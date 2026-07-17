@@ -15,9 +15,11 @@
 ```sh
 make test
 make app
+make package
 ```
 
-Готовое приложение: `dist/ScrollProbe.app`.
+Готовое приложение: `dist/ScrollProbe.app`. Команда `make package` создает
+переносимый архив `dist/ScrollProbe-macos-arm64.zip`.
 
 Сборка подписывается ad-hoc со стабильным локальным designated requirement по
 bundle ID. Обычная ad-hoc подпись привязана к `cdhash`, из-за чего macOS считает
@@ -45,6 +47,27 @@ permission flow в приложении нет.
 `Start monitor` растут одновременно `ingress.totalObserved` и
 `downstream.totalObserved`.
 
+## Перенос в guest
+
+Собирать приложение в guest не нужно. Host и guest используют Apple Silicon и
+macOS 15, поэтому в обеих системах запускается один и тот же собранный bundle.
+
+1. Скопировать `dist/ScrollProbe-macos-arm64.zip` в guest.
+2. Распаковать архив и перенести `ScrollProbe.app` в `~/Applications` или
+   `/Applications`. Не запускать его прямо из UTM shared directory.
+3. Первый раз запустить через Finder командой `Open` из контекстного меню.
+4. Выдать Accessibility внутри guest и при необходимости перезапустить app.
+
+TCC-базы host и guest независимы, поэтому право выдается один раз в каждой ОС.
+Xcode, Swift и остальные инструменты сборки в guest не требуются.
+
+Если macOS сохранила quarantine attribute и продолжает блокировать локальный
+диагностический bundle, удалить его уже после копирования в `~/Applications`:
+
+```sh
+xattr -dr com.apple.quarantine "$HOME/Applications/ScrollProbe.app"
+```
+
 ## Логи
 
 Каждый запуск monitor создает JSONL:
@@ -65,32 +88,41 @@ inventory нужно делать только в заранее отмечен�
 
 ## Первый baseline
 
-Для каждого сценария используется отдельный run и понятное значение `Scenario`:
+Для каждого сценария используется отдельный run. Сценарии, направленные в
+guest, записываются одновременно двумя экземплярами ScrollProbe:
 
-1. `host-native-trackpad`
-2. `host-horizon-trackpad`
-3. `guest-native-trackpad`
-4. `guest-horizon-ubuntu-trackpad`
-5. `guest-horizon-windows-trackpad`
-6. `guest-horizon-ubuntu-mouse`
-7. `guest-horizon-windows-mouse`
+| Действие | Scenario на host | Scenario в guest |
+|---|---|---|
+| Нативное приложение host, trackpad | `host-native-trackpad` | - |
+| Horizon напрямую на host, trackpad | `host-horizon-trackpad` | - |
+| Нативное приложение guest, trackpad | `host-to-guest-native-trackpad` | `guest-native-trackpad` |
+| Ubuntu Horizon в guest, trackpad | `host-to-guest-horizon-ubuntu-trackpad` | `guest-horizon-ubuntu-trackpad` |
+| Windows Horizon в guest, trackpad | `host-to-guest-horizon-windows-trackpad` | `guest-horizon-windows-trackpad` |
+| Ubuntu Horizon в guest, mouse | `host-to-guest-horizon-ubuntu-mouse` | `guest-horizon-ubuntu-mouse` |
+| Windows Horizon в guest, mouse | `host-to-guest-horizon-windows-mouse` | `guest-horizon-windows-mouse` |
 
 Порядок одного прогона:
 
-1. Нажать `Start monitor`.
-2. Подождать две секунды без input.
+1. Для guest-сценария нажать `Start monitor` сначала на host, затем в guest.
+2. Подождать две секунды без input после запуска обоих probes.
 3. Выполнить один короткий контролируемый scroll gesture.
 4. Не касаться устройств до полного завершения momentum.
 5. Подождать две секунды.
-6. Нажать `Stop`.
+6. Для guest-сценария нажать `Stop` сначала в guest, затем на host.
 7. Сохранить наблюдение о freeze и имя JSONL-файла.
+
+Один gesture означает одно непрерывное вертикальное движение двумя пальцами с
+последующим отпусканием, без повторного касания и смены направления. Для mouse
+control используется один дискретный шаг колеса. Обычное перемещение указателя
+не попадает в эти логи, но случайная или продолжительная прокрутка непригодна
+для численного сравнения сценариев.
 
 Для первого raw baseline в guest нужно завершить LinearMouse. Отдельные прогоны
 с LinearMouse выполняются позднее с дополнительным суффиксом scenario, например
 `guest-horizon-ubuntu-trackpad-linearmouse`.
 
-Один и тот же собранный `ScrollProbe.app` следует скопировать с host в guest,
-чтобы сравнивать одинаковый код. Accessibility выдается отдельно в каждой ОС.
+Один и тот же архив следует использовать на host и guest, чтобы сравнивать
+одинаковый код. До завершения baseline его не следует пересобирать.
 
 ## Интерпретация
 

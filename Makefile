@@ -4,9 +4,10 @@ CONFIGURATION ?= release
 SWIFT_BUILD_DIR := .build/$(CONFIGURATION)
 DIST_DIR := dist
 APP_DIR := $(DIST_DIR)/$(APP_NAME).app
+ARCHIVE_PATH := $(DIST_DIR)/$(APP_NAME)-macos-arm64.zip
 CONTENTS_DIR := $(APP_DIR)/Contents
 
-.PHONY: all build test app run install clean
+.PHONY: all build test app package run install clean
 
 all: test app
 
@@ -23,6 +24,10 @@ app: build
 	cp "Resources/Info.plist" "$(CONTENTS_DIR)/Info.plist"
 	codesign --force --sign - --identifier "$(BUNDLE_ID)" \
 		--requirements '=designated => identifier "$(BUNDLE_ID)"' "$(APP_DIR)"
+
+package: app
+	rm -f "$(ARCHIVE_PATH)"
+	ditto -c -k --sequesterRsrc --keepParent "$(APP_DIR)" "$(ARCHIVE_PATH)"
 
 run: app
 	open "$(APP_DIR)"

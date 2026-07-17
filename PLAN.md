@@ -315,16 +315,19 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | Локальные upstream clones | Завершено, ревизии зафиксированы |
 | Архитектура ScrollProbe | Утверждена, public API baseline |
 | ScrollProbe monitor | Реализован, host smoke test пройден |
+| Переносимый guest bundle | Готов, `dist/ScrollProbe-macos-arm64.zip` |
 | Drop-all bypass test | Не начат |
 | Throttling filter | Не начат, заблокирован измерениями |
 | IOHID/DriverKit | Не начат, заблокирован bypass test |
 
 ## Следующий шаг
 
-Повторить стандартизованный baseline по инструкции `README.md` на host и guest,
-включая direct host Horizon, guest native app, оба guest VDI и Bluetooth-мышь.
-До добавления drop-all сначала сравнить cumulative event count, rate, delta и
-phases между этими сценариями.
+Перенести готовый архив в guest и повторить стандартизованный baseline по
+инструкции `README.md`, включая direct host Horizon, guest native app, оба guest
+VDI и Bluetooth-мышь. Guest-сценарии записывать одновременно на host и guest,
+чтобы одна физическая прокрутка дала сопоставимую пару логов. До добавления
+drop-all сначала сравнить cumulative event count, rate, delta и phases между
+этими сценариями.
 
 ## Smoke test ScrollProbe 2026-07-17
 
