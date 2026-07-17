@@ -120,6 +120,7 @@ final class EventTapHandle {
         case .tapDisabledByUserInput:
             context.wasDisabledByUserInput = true
             context.disabledHandler(.userInput)
+            context.faultHandler("Event tap was disabled by user input.")
             return Unmanaged.passUnretained(event)
 
         case .scrollWheel:

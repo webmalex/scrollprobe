@@ -18,20 +18,20 @@ final class MetricsAccumulatorTests: XCTestCase {
         accumulator.record(
             stage: .ingress,
             sample: ScrollSample(event: event, receivedUptimeNanos: 1_100_000_000),
-            decision: .pass,
-            callbackDurationNanos: 10_000
+            decision: .pass
         )
+        accumulator.recordCallbackDuration(stage: .ingress, nanoseconds: 10_000)
         accumulator.record(
             stage: .ingress,
             sample: ScrollSample(event: event, receivedUptimeNanos: 1_200_000_000),
-            decision: .drop,
-            callbackDurationNanos: 20_000
+            decision: .drop
         )
+        accumulator.recordCallbackDuration(stage: .ingress, nanoseconds: 20_000)
         accumulator.record(
             stage: .downstream,
-            sample: ScrollSample(event: event, receivedUptimeNanos: 1_210_000_000),
-            callbackDurationNanos: 5_000
+            sample: ScrollSample(event: event, receivedUptimeNanos: 1_210_000_000)
         )
+        accumulator.recordCallbackDuration(stage: .downstream, nanoseconds: 5_000)
         accumulator.recordDisabled(stage: .ingress, reason: .timeout)
 
         let first = accumulator.takeSnapshot(uptimeNanos: 2_000_000_000)

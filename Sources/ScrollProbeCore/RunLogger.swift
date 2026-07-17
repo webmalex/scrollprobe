@@ -20,6 +20,7 @@ public final class RunLogger {
     public let fileURL: URL
 
     private let queue = DispatchQueue(label: "dev.scrollprobe.log-writer", qos: .utility)
+    private let queueKey = DispatchSpecificKey<Void>()
     private let fileHandle: FileHandle
     private var isClosed = false
 
@@ -38,6 +39,7 @@ public final class RunLogger {
             throw RunLoggerError.cannotCreateLogFile(fileURL)
         }
         fileHandle = handle
+        queue.setSpecific(key: queueKey, value: ())
     }
 
     deinit {
@@ -61,13 +63,21 @@ public final class RunLogger {
     }
 
     public func close() {
-        queue.sync {
-            guard !isClosed else {
-                return
+        if DispatchQueue.getSpecific(key: queueKey) != nil {
+            closeOnQueue()
+        } else {
+            queue.sync {
+                closeOnQueue()
             }
-            isClosed = true
-            try? fileHandle.synchronize()
-            try? fileHandle.close()
         }
+    }
+
+    private func closeOnQueue() {
+        guard !isClosed else {
+            return
+        }
+        isClosed = true
+        try? fileHandle.synchronize()
+        try? fileHandle.close()
     }
 }

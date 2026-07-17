@@ -1,4 +1,5 @@
 import CoreGraphics
+import Darwin
 import Foundation
 
 public enum ProbeEngineState: String, Sendable {
@@ -46,7 +47,7 @@ public final class ProbeEngine {
         stop()
     }
 
-    public func start() throws {
+    public func start(scenario: String = "") throws {
         guard state == .stopped || state == .failed else {
             throw ProbeEngineError.alreadyRunning
         }
@@ -56,8 +57,22 @@ public final class ProbeEngine {
 
         updateState(.starting, message: "Creating event taps...")
         let runID = UUID()
-        let metrics = MetricsAccumulator(runID: runID)
         let logger = try RunLogger(runID: runID)
+        let startedAt = Date()
+        let metadata = ProbeRunMetadata(
+            runID: runID,
+            startedAt: startedAt,
+            operatingSystemVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            hostName: Self.localHostName,
+            processID: ProcessInfo.processInfo.processIdentifier,
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "dev.scrollprobe.ScrollProbe",
+            scenario: scenario.trimmingCharacters(in: .whitespacesAndNewlines),
+            ingressDescription: "kCGHIDEventTap/headInsert/default/pass-through",
+            downstreamDescription: "kCGAnnotatedSessionEventTap/tailAppend/listenOnly"
+        )
+        logger.write(ProbeLogRecord(type: "run-start", timestamp: startedAt, runID: runID, metadata: metadata))
+
+        let metrics = MetricsAccumulator(runID: runID)
         let eventThread = EventTapThread()
 
         self.runID = runID
@@ -79,26 +94,23 @@ public final class ProbeEngine {
             throw error
         }
 
-        let metadata = ProbeRunMetadata(
-            runID: runID,
-            startedAt: Date(),
-            operatingSystemVersion: ProcessInfo.processInfo.operatingSystemVersionString,
-            hostName: ProcessInfo.processInfo.hostName,
-            processID: ProcessInfo.processInfo.processIdentifier,
-            bundleIdentifier: Bundle.main.bundleIdentifier ?? "dev.scrollprobe.ScrollProbe",
-            ingressDescription: "kCGHIDEventTap/headInsert/default/pass-through",
-            downstreamDescription: "kCGAnnotatedSessionEventTap/tailAppend/listenOnly"
-        )
-        logger.write(ProbeLogRecord(type: "run-start", runID: runID, metadata: metadata))
-        if let taps = try? captureTapInventory(label: "after-start") {
-            publishStatus("Monitoring started with \(taps.count) registered event taps.")
-        } else {
-            publishStatus("Monitoring started; event tap inventory was unavailable.")
-        }
         updateState(.monitoring, message: "Monitor-only mode is active.")
+        DispatchQueue.global(qos: .utility).async { [weak self, logger] in
+            do {
+                let taps = try TapInventory.snapshot()
+                logger.write(ProbeLogRecord(type: "tap-inventory", runID: runID, taps: taps, label: "after-start"))
+                self?.publishStatusIfMonitoring("Monitoring started with \(taps.count) registered event taps.")
+            } catch {
+                self?.publishStatusIfMonitoring("Monitoring started; event tap inventory failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     public func stop() {
+        stop(finalState: .stopped, message: "Monitoring stopped.")
+    }
+
+    private func stop(finalState: ProbeEngineState, message: String) {
         guard state == .monitoring || state == .starting || state == .failed else {
             return
         }
@@ -121,23 +133,27 @@ public final class ProbeEngine {
         }
 
         if let runID {
-            logger?.write(ProbeLogRecord(type: "run-stop", runID: runID, message: "Monitoring stopped."))
+            logger?.write(ProbeLogRecord(type: "run-stop", runID: runID, message: message))
         }
         logger?.close()
         logger = nil
         eventThread = nil
         metrics = nil
         runID = nil
-        updateState(.stopped, message: "Monitoring stopped.")
+        updateState(finalState, message: message)
     }
 
     @discardableResult
     public func captureTapInventory(label: String) throws -> [EventTapInfo] {
         let taps = try TapInventory.snapshot()
+        recordTapInventory(taps, label: label)
+        return taps
+    }
+
+    public func recordTapInventory(_ taps: [EventTapInfo], label: String) {
         if let runID {
             logger?.write(ProbeLogRecord(type: "tap-inventory", runID: runID, taps: taps, label: label))
         }
-        return taps
     }
 
     private func installTapsAndTimer() throws {
@@ -155,7 +171,7 @@ public final class ProbeEngine {
                 self?.metrics?.recordDisabled(stage: .ingress, reason: reason)
             },
             faultHandler: { [weak self] message in
-                self?.publishStatus("Ingress tap fault: \(message)")
+                self?.handleFatalTapFault("Ingress tap fault: \(message)")
             }
         )
 
@@ -173,7 +189,7 @@ public final class ProbeEngine {
                 self?.metrics?.recordDisabled(stage: .downstream, reason: reason)
             },
             faultHandler: { [weak self] message in
-                self?.publishStatus("Downstream tap fault: \(message)")
+                self?.handleFatalTapFault("Downstream tap fault: \(message)")
             }
         )
 
@@ -187,13 +203,13 @@ public final class ProbeEngine {
     private func record(event: CGEvent, stage: TapStage, decision: TapDecision?) {
         let callbackStart = DispatchTime.now().uptimeNanoseconds
         let sample = ScrollSample(event: event, receivedUptimeNanos: callbackStart)
-        let callbackDuration = DispatchTime.now().uptimeNanoseconds - callbackStart
         metrics?.record(
             stage: stage,
             sample: sample,
-            decision: decision,
-            callbackDurationNanos: callbackDuration
+            decision: decision
         )
+        let callbackDuration = DispatchTime.now().uptimeNanoseconds - callbackStart
+        metrics?.recordCallbackDuration(stage: stage, nanoseconds: callbackDuration)
     }
 
     private func publishMetricsSnapshot() {
@@ -240,5 +256,31 @@ public final class ProbeEngine {
             }
             self.onStatus?(self.state, message)
         }
+    }
+
+    private func publishStatusIfMonitoring(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.state == .monitoring else {
+                return
+            }
+            self.onStatus?(self.state, message)
+        }
+    }
+
+    private func handleFatalTapFault(_ message: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.state == .monitoring || self.state == .starting else {
+                return
+            }
+            self.stop(finalState: .failed, message: message)
+        }
+    }
+
+    private static var localHostName: String {
+        var buffer = [CChar](repeating: 0, count: 256)
+        guard gethostname(&buffer, buffer.count) == 0 else {
+            return "unknown"
+        }
+        return String(cString: buffer)
     }
 }

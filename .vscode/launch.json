@@ -1,0 +1,24 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:osx-scroll}",
+      "name": "Debug ScrollProbe",
+      "target": "ScrollProbe",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug ScrollProbe"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:osx-scroll}",
+      "name": "Release ScrollProbe",
+      "target": "ScrollProbe",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release ScrollProbe"
+    }
+  ]
+}

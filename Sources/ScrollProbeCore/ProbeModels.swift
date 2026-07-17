@@ -123,6 +123,7 @@ public struct ProbeRunMetadata: Codable, Equatable, Sendable {
     public let hostName: String
     public let processID: Int32
     public let bundleIdentifier: String
+    public let scenario: String
     public let ingressDescription: String
     public let downstreamDescription: String
 }

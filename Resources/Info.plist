@@ -24,6 +24,8 @@
     <string>15.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>ScrollProbe observes scroll-wheel events to compare input before and after macOS event filters.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>

@@ -314,16 +314,32 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | Upstream source reconnaissance | Завершено, выводы в `UPSTREAM.md` |
 | Локальные upstream clones | Завершено, ревизии зафиксированы |
 | Архитектура ScrollProbe | Утверждена, public API baseline |
-| ScrollProbe monitor | Не начат |
+| ScrollProbe monitor | Реализован, host smoke test пройден |
 | Drop-all bypass test | Не начат |
 | Throttling filter | Не начат, заблокирован измерениями |
 | IOHID/DriverKit | Не начат, заблокирован bypass test |
 
 ## Следующий шаг
 
-Создать минимальный проект `ScrollProbe.app`, реализовать dedicated event thread,
-public-field sample extraction, ingress/downstream taps и one-second aggregate
-metrics. До добавления drop-all сначала получить monitor-only baseline.
+Повторить стандартизованный baseline по инструкции `README.md` на host и guest,
+включая direct host Horizon, guest native app, оба guest VDI и Bluetooth-мышь.
+До добавления drop-all сначала сравнить cumulative event count, rate, delta и
+phases между этими сценариями.
+
+## Smoke test ScrollProbe 2026-07-17
+
+Первые два не стандартизованных запуска на host подтвердили работоспособность
+обоих taps и JSONL pipeline:
+
+1. Один run накопил 1577 ingress и 1577 downstream events, peak около 145/s.
+2. Второй run накопил 270 ingress и 270 downstream events, peak около 131/s.
+3. В активных окнах события были continuous и содержали scroll/momentum phases.
+4. Timeout или user-input disable не зарегистрированы.
+5. Расхождения отдельных секундных окон компенсировались на следующей границе;
+   cumulative totals совпали.
+
+Это только host smoke test без стандартизованного одного gesture. Он не
+подтверждает и не опровергает amplification на границе host -> guest.
 
 ## Известные организационные блокеры
 

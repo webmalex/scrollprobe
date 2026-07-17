@@ -15,14 +15,22 @@ public final class MetricsAccumulator {
     public func record(
         stage: TapStage,
         sample: ScrollSample,
-        decision: TapDecision? = nil,
-        callbackDurationNanos: UInt64
+        decision: TapDecision? = nil
     ) {
         switch stage {
         case .ingress:
-            ingress.record(sample, decision: decision, callbackDurationNanos: callbackDurationNanos)
+            ingress.record(sample, decision: decision)
         case .downstream:
-            downstream.record(sample, decision: decision, callbackDurationNanos: callbackDurationNanos)
+            downstream.record(sample, decision: decision)
+        }
+    }
+
+    public func recordCallbackDuration(stage: TapStage, nanoseconds: UInt64) {
+        switch stage {
+        case .ingress:
+            ingress.recordCallbackDuration(nanoseconds)
+        case .downstream:
+            downstream.recordCallbackDuration(nanoseconds)
         }
     }
 
@@ -94,8 +102,7 @@ private struct StageAccumulator {
 
     mutating func record(
         _ sample: ScrollSample,
-        decision: TapDecision?,
-        callbackDurationNanos: UInt64
+        decision: TapDecision?
     ) {
         observed += 1
         totalObserved += 1
@@ -137,13 +144,15 @@ private struct StageAccumulator {
         }
         lastReceivedNanos = sample.receivedUptimeNanos
 
-        callbackCount += 1
-        callbackNanosSum += callbackDurationNanos
-        maxCallbackNanos = max(maxCallbackNanos, callbackDurationNanos)
-
         scrollPhaseCounts[String(sample.scrollPhase), default: 0] += 1
         momentumPhaseCounts[String(sample.momentumPhase), default: 0] += 1
         sourcePIDCounts[String(sample.sourcePID), default: 0] += 1
+    }
+
+    mutating func recordCallbackDuration(_ nanoseconds: UInt64) {
+        callbackCount += 1
+        callbackNanosSum += nanoseconds
+        maxCallbackNanos = max(maxCallbackNanos, nanoseconds)
     }
 
     mutating func recordDisabled(_ reason: TapDisableReason) {

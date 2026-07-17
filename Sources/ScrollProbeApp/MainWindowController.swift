@@ -7,6 +7,7 @@ final class MainWindowController: NSWindowController {
     private let stateLabel = NSTextField(labelWithString: "Stopped")
     private let logPathLabel = NSTextField(labelWithString: "No active log")
     private let detailsTextView = NSTextView()
+    private let scenarioField = NSTextField(string: "host-native-trackpad")
     private let startButton = NSButton()
     private let stopButton = NSButton()
     private var permissionTimer: Timer?
@@ -89,6 +90,17 @@ final class MainWindowController: NSWindowController {
         permissionButtons.spacing = 8
         root.addArrangedSubview(permissionButtons)
 
+        let scenarioRow = NSStackView()
+        scenarioRow.orientation = .horizontal
+        scenarioRow.alignment = .centerY
+        scenarioRow.spacing = 8
+        scenarioRow.addArrangedSubview(NSTextField(labelWithString: "Scenario:"))
+        scenarioField.placeholderString = "guest-horizon-ubuntu-trackpad"
+        scenarioField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        scenarioRow.addArrangedSubview(scenarioField)
+        scenarioField.widthAnchor.constraint(greaterThanOrEqualToConstant: 360).isActive = true
+        root.addArrangedSubview(scenarioRow)
+
         let monitorButtons = NSStackView()
         monitorButtons.orientation = .horizontal
         monitorButtons.spacing = 8
@@ -125,6 +137,20 @@ final class MainWindowController: NSWindowController {
         detailsTextView.isSelectable = true
         detailsTextView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         detailsTextView.textContainerInset = NSSize(width: 10, height: 10)
+        detailsTextView.frame = NSRect(x: 0, y: 0, width: 880, height: 280)
+        detailsTextView.minSize = NSSize(width: 0, height: 0)
+        detailsTextView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        detailsTextView.isVerticallyResizable = true
+        detailsTextView.isHorizontallyResizable = false
+        detailsTextView.autoresizingMask = [.width]
+        detailsTextView.textContainer?.containerSize = NSSize(
+            width: 880,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        detailsTextView.textContainer?.widthTracksTextView = true
         detailsTextView.string = "No measurements yet."
         scrollView.documentView = detailsTextView
         root.addArrangedSubview(scrollView)
@@ -152,13 +178,14 @@ final class MainWindowController: NSWindowController {
         let accessibility = EventAccess.accessibilityEnabled ? "granted" : "missing"
         let listening = EventAccess.listenEnabled ? "granted" : "missing"
         permissionLabel.stringValue =
-            "Accessibility: \(accessibility)    Input Monitoring: \(listening)"
+            "Accessibility: \(accessibility)    Input Monitoring API: \(listening) (optional for current taps)"
     }
 
     private func updateButtons(for state: ProbeEngineState) {
         let isActive = state == .starting || state == .monitoring || state == .stopping
         startButton.isEnabled = !isActive
         stopButton.isEnabled = state == .monitoring
+        scenarioField.isEnabled = !isActive
     }
 
     @objc private func requestAccessibility() {
@@ -167,13 +194,19 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc private func requestInputMonitoring() {
-        EventAccess.requestListenAccess()
+        let granted = EventAccess.requestListenAccess()
         refreshPermissionStatus()
+        if granted {
+            stateLabel.stringValue = "Input Monitoring access is already available."
+        } else {
+            stateLabel.stringValue = "Input Monitoring was not granted; opened System Settings."
+            openPrivacySettings(anchor: "Privacy_ListenEvent")
+        }
     }
 
     @objc private func startMonitoring() {
         do {
-            try engine.start()
+            try engine.start(scenario: scenarioField.stringValue)
             if let logURL = engine.logURL {
                 logPathLabel.stringValue = logURL.path
             }
@@ -188,12 +221,23 @@ final class MainWindowController: NSWindowController {
     }
 
     @objc private func snapshotTaps() {
-        do {
-            let taps = try engine.captureTapInventory(label: "manual")
-            detailsTextView.string = Self.format(taps)
-            stateLabel.stringValue = "Captured \(taps.count) event taps."
-        } catch {
-            stateLabel.stringValue = "Tap inventory failed: \(error.localizedDescription)"
+        stateLabel.stringValue = "Capturing event taps..."
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else {
+                return
+            }
+            do {
+                let taps = try TapInventory.snapshot()
+                DispatchQueue.main.async {
+                    self.engine.recordTapInventory(taps, label: "manual")
+                    self.detailsTextView.string = Self.format(taps)
+                    self.stateLabel.stringValue = "Captured \(taps.count) event taps."
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.stateLabel.stringValue = "Tap inventory failed: \(error.localizedDescription)"
+                }
+            }
         }
     }
 
@@ -213,6 +257,15 @@ final class MainWindowController: NSWindowController {
         let label = NSTextField(wrappingLabelWithString: text)
         label.textColor = .secondaryLabelColor
         return label
+    }
+
+    private func openPrivacySettings(anchor: String) {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
+        ) else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     private static func format(_ snapshot: ProbeMetricsSnapshot) -> String {
