@@ -40,6 +40,8 @@ public final class ProbeEngine {
     private var snapshotTimer: Timer?
     private var metrics: MetricsAccumulator?
     private var logger: RunLogger?
+    private var activeMode: ProbeMode = .monitor
+    private var dropAllDeadlineUptimeNanos: UInt64?
 
     public init() {}
 
@@ -47,7 +49,11 @@ public final class ProbeEngine {
         stop()
     }
 
-    public func start(scenario: String = "") throws {
+    public func start(
+        scenario: String = "",
+        mode: ProbeMode = .monitor,
+        logDirectory: URL = RunLogger.defaultLogDirectory
+    ) throws {
         guard state == .stopped || state == .failed else {
             throw ProbeEngineError.alreadyRunning
         }
@@ -57,7 +63,7 @@ public final class ProbeEngine {
 
         updateState(.starting, message: "Creating event taps...")
         let runID = UUID()
-        let logger = try RunLogger(runID: runID)
+        let logger = try RunLogger(runID: runID, directory: logDirectory)
         let startedAt = Date()
         let metadata = ProbeRunMetadata(
             runID: runID,
@@ -66,8 +72,11 @@ public final class ProbeEngine {
             hostName: Self.localHostName,
             processID: ProcessInfo.processInfo.processIdentifier,
             bundleIdentifier: Bundle.main.bundleIdentifier ?? "dev.scrollprobe.ScrollProbe",
+            applicationVersion: Self.applicationVersion,
+            applicationBuild: Self.applicationBuild,
             scenario: scenario.trimmingCharacters(in: .whitespacesAndNewlines),
-            ingressDescription: "kCGHIDEventTap/headInsert/default/pass-through",
+            mode: mode,
+            ingressDescription: "kCGHIDEventTap/headInsert/default/\(mode.rawValue)",
             downstreamDescription: "kCGAnnotatedSessionEventTap/tailAppend/listenOnly"
         )
         logger.write(ProbeLogRecord(type: "run-start", timestamp: startedAt, runID: runID, metadata: metadata))
@@ -80,6 +89,11 @@ public final class ProbeEngine {
         self.logger = logger
         self.logURL = logger.fileURL
         self.eventThread = eventThread
+        activeMode = mode
+        dropAllDeadlineUptimeNanos = mode == .dropAll
+            ? DispatchTime.now().uptimeNanoseconds +
+                UInt64(ProbeMode.dropAllDurationSeconds) * UInt64(NSEC_PER_SEC)
+            : nil
         eventThread.start()
 
         do {
@@ -94,7 +108,7 @@ public final class ProbeEngine {
             throw error
         }
 
-        updateState(.monitoring, message: "Monitor-only mode is active.")
+        updateState(.monitoring, message: Self.statusMessage(for: mode))
         DispatchQueue.global(qos: .utility).async { [weak self, logger] in
             do {
                 let taps = try TapInventory.snapshot()
@@ -140,6 +154,8 @@ public final class ProbeEngine {
         eventThread = nil
         metrics = nil
         runID = nil
+        activeMode = .monitor
+        dropAllDeadlineUptimeNanos = nil
         updateState(finalState, message: message)
     }
 
@@ -164,8 +180,7 @@ public final class ProbeEngine {
             placement: .headInsertEventTap,
             options: .defaultTap,
             eventHandler: { [weak self] event in
-                self?.record(event: event, stage: .ingress, decision: .pass)
-                return .pass
+                self?.handleIngress(event) ?? .pass
             },
             disabledHandler: { [weak self] reason in
                 self?.metrics?.recordDisabled(stage: .ingress, reason: reason)
@@ -200,12 +215,26 @@ public final class ProbeEngine {
         RunLoop.current.add(timer, forMode: .common)
     }
 
-    private func record(event: CGEvent, stage: TapStage, decision: TapDecision?) {
+    private func handleIngress(_ event: CGEvent) -> TapDecision {
         let callbackStart = DispatchTime.now().uptimeNanoseconds
         let sample = ScrollSample(event: event, receivedUptimeNanos: callbackStart)
+        expireDropAllIfNeeded(nowUptimeNanos: callbackStart)
+        let decision = activeMode.decision(for: sample)
+        metrics?.record(
+            stage: .ingress,
+            sample: sample,
+            decision: decision
+        )
+        let callbackDuration = DispatchTime.now().uptimeNanoseconds - callbackStart
+        metrics?.recordCallbackDuration(stage: .ingress, nanoseconds: callbackDuration)
+        return decision
+    }
+
+    private func record(event: CGEvent, stage: TapStage, decision: TapDecision?) {
+        let callbackStart = DispatchTime.now().uptimeNanoseconds
         metrics?.record(
             stage: stage,
-            sample: sample,
+            sample: ScrollSample(event: event, receivedUptimeNanos: callbackStart),
             decision: decision
         )
         let callbackDuration = DispatchTime.now().uptimeNanoseconds - callbackStart
@@ -213,6 +242,7 @@ public final class ProbeEngine {
     }
 
     private func publishMetricsSnapshot() {
+        expireDropAllIfNeeded(nowUptimeNanos: DispatchTime.now().uptimeNanoseconds)
         guard let snapshot = metrics?.takeSnapshot() else {
             return
         }
@@ -241,7 +271,27 @@ public final class ProbeEngine {
         logger = nil
         eventThread = nil
         metrics = nil
+        activeMode = .monitor
+        dropAllDeadlineUptimeNanos = nil
         updateState(.failed, message: message)
+    }
+
+    private func expireDropAllIfNeeded(nowUptimeNanos: UInt64) {
+        guard activeMode == .dropAll,
+              let deadline = dropAllDeadlineUptimeNanos,
+              nowUptimeNanos >= deadline else {
+            return
+        }
+        activeMode = .monitor
+        dropAllDeadlineUptimeNanos = nil
+        if let runID {
+            logger?.write(ProbeLogRecord(
+                type: "mode-change",
+                runID: runID,
+                message: "drop-all expired; continuing in monitor mode"
+            ))
+        }
+        publishStatusIfMonitoring("Drop-all expired; monitor-only mode is now active.")
     }
 
     private func updateState(_ state: ProbeEngineState, message: String) {
@@ -282,5 +332,24 @@ public final class ProbeEngine {
             return "unknown"
         }
         return String(cString: buffer)
+    }
+
+    private static var applicationVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
+    }
+
+    private static var applicationBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development"
+    }
+
+    private static func statusMessage(for mode: ProbeMode) -> String {
+        switch mode {
+        case .monitor:
+            return "Monitor-only mode is active."
+        case .dropZeroDeltaChanged:
+            return "Dropping zero-delta scrollPhase=changed events."
+        case .dropAll:
+            return "Dropping all scroll events for \(ProbeMode.dropAllDurationSeconds) seconds."
+        }
     }
 }

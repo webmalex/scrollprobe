@@ -11,6 +11,25 @@ public enum TapDecision: String, Codable, Sendable {
     case drop
 }
 
+public enum ProbeMode: String, Codable, CaseIterable, Sendable {
+    case monitor
+    case dropZeroDeltaChanged = "drop-zero-delta-changed"
+    case dropAll = "drop-all"
+
+    public static let dropAllDurationSeconds = 10
+
+    public func decision(for sample: ScrollSample) -> TapDecision {
+        switch self {
+        case .monitor:
+            return .pass
+        case .dropZeroDeltaChanged:
+            return sample.isZeroDeltaChanged ? .drop : .pass
+        case .dropAll:
+            return .drop
+        }
+    }
+}
+
 public enum TapDisableReason: String, Codable, Sendable {
     case timeout
     case userInput
@@ -58,6 +77,10 @@ public struct ScrollSample: Codable, Equatable, Sendable {
         integerDeltaX != 0 || integerDeltaY != 0 ||
             fixedDeltaX != 0 || fixedDeltaY != 0 ||
             pointDeltaX != 0 || pointDeltaY != 0
+    }
+
+    public var isZeroDeltaChanged: Bool {
+        !hasAnyDelta && scrollPhase == Int64(CGScrollPhase.changed.rawValue)
     }
 }
 
@@ -123,7 +146,10 @@ public struct ProbeRunMetadata: Codable, Equatable, Sendable {
     public let hostName: String
     public let processID: Int32
     public let bundleIdentifier: String
+    public let applicationVersion: String
+    public let applicationBuild: String
     public let scenario: String
+    public let mode: ProbeMode
     public let ingressDescription: String
     public let downstreamDescription: String
 }
