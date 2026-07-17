@@ -7,7 +7,7 @@
 Это живой документ для продолжения работы из новых чистых сессий. Он отделяет
 подтвержденные факты от гипотез, фиксирует уже выполненные проверки и указывает
 следующий эксперимент. Перед продолжением задачи нужно прочитать `AGENTS.md`,
-этот файл и исходные материалы `ai/001.md` - `ai/003.md`.
+этот файл, `UPSTREAM.md` и исходные материалы `ai/001.md` - `ai/003.md`.
 
 ## Цель
 
@@ -92,6 +92,13 @@ Host: macOS 15.7.7, Apple Silicon M1 Max
    пропускает события, распознанные как trackpad. Его лицензия CC BY-NC 4.0.
 8. Mac Mouse Fix содержит полезные IOHID/private API наработки, но значительно
    сложнее и использует нестандартную лицензию.
+9. В Apple backend UTM не обрабатывает scroll delta собственным кодом. Он
+   создает обычный `VZVirtualMachineView`, после чего закрытый
+   Virtualization.framework самостоятельно преобразует host input в reports
+   виртуального pointing device.
+10. `Generic Mouse` меняет класс виртуального устройства, но сохраняет тот же
+    opaque `VZVirtualMachineView` input path. Это согласуется с тем, что данный
+    workaround не помог в нашей конфигурации.
 
 ## Рабочие гипотезы
 
@@ -150,8 +157,8 @@ Bluetooth-мышь делают общую неисправность сети �
 
 ## Принятые решения
 
-1. Клонировать полные upstream-репозитории в игнорируемый каталог `upstream/`:
-   LinearMouse, Mos, Mac Mouse Fix и UTM.
+1. Полные upstream-репозитории клонированы в игнорируемый каталог `upstream/`:
+   LinearMouse, Mos, Mac Mouse Fix и UTM. Ревизии записаны в `UPSTREAM.md`.
 2. Считать LinearMouse основным MIT-референсом для CGEventTap и scroll fields.
 3. Не начинать с форка большой GUI-утилиты и не писать DriverKit/kext до
    доказательства, что более простой CGEventTap недостаточен.
@@ -162,13 +169,21 @@ Bluetooth-мышь делают общую неисправность сети �
 6. Callback event tap не должен синхронно писать каждое событие в файл или
    выполнять дорогие AppKit/Accessibility-вызовы. Это исказит измерения и может
    привести к `tapDisabledByTimeout`.
+7. Первая версия ScrollProbe использует только public CGEvent fields. Private
+   `CGEventCopyIOHIDEvent` добавляется позднее как optional experimental backend,
+   если public baseline окажется недостаточным.
+8. Если guest tap окажется слишком поздним, следующий ранний эксперимент -
+   минимальный subclass `VZVirtualMachineView` в UTM, считающий и временно
+   блокирующий вызовы `scrollWheel(with:)`.
 
 ## Архитектура ScrollProbe
 
 ### Режим monitor
 
 1. Ingress active/pass-through tap: `kCGHIDEventTap + kCGHeadInsertEventTap`.
-2. Downstream listen-only tap для наблюдения событий после фильтров.
+2. Downstream listen-only tap: сначала
+   `kCGAnnotatedSessionEventTap + kCGTailAppendEventTap`, с возможностью менять
+   tap location для сравнительных прогонов.
 3. Снимок `CGGetEventTapList` с PID, process path, tap point, options, mask,
    enabled и latency до и после запуска Horizon/LinearMouse.
 4. Агрегация раз в секунду вместо постоянного per-event logging.
@@ -178,7 +193,8 @@ Bluetooth-мышь делают общую неисправность сети �
 
 - `ingress`, `returned`, `observedDownstream`, `dropped`;
 - события в секунду и минимальный/средний/максимальный inter-arrival time;
-- integer, fixed-point, point и IOHID delta по X/Y;
+- integer, fixed-point и point delta по X/Y;
+- optional IOHID delta и явный признак доступности private payload;
 - сумма и распределение delta;
 - `continuous`, scroll phase и momentum phase;
 - source PID/userData и признак synthetic event;
@@ -295,8 +311,9 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | Выравнивание host/guest macOS | Завершено, не помогло |
 | LinearMouse line mode/no inertia | Проверено, недостаточно |
 | UTM Pointer x Dynamic Resolution matrix | Завершено, улучшение не подтверждено |
-| Upstream source reconnaissance | Частично завершено через GitHub API |
-| Локальные upstream clones | Следующий шаг |
+| Upstream source reconnaissance | Завершено, выводы в `UPSTREAM.md` |
+| Локальные upstream clones | Завершено, ревизии зафиксированы |
+| Архитектура ScrollProbe | Утверждена, public API baseline |
 | ScrollProbe monitor | Не начат |
 | Drop-all bypass test | Не начат |
 | Throttling filter | Не начат, заблокирован измерениями |
@@ -304,8 +321,9 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 
 ## Следующий шаг
 
-Выполнить E0: подготовить локальные upstream clones, зафиксировать ревизии и
-после локального чтения исходников утвердить минимальную структуру ScrollProbe.
+Создать минимальный проект `ScrollProbe.app`, реализовать dedicated event thread,
+public-field sample extraction, ingress/downstream taps и one-second aggregate
+metrics. До добавления drop-all сначала получить monitor-only baseline.
 
 ## Известные организационные блокеры
 
