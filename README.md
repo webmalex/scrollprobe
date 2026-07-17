@@ -1,12 +1,26 @@
 # ScrollProbe
 
-`ScrollProbe.app` измеряет scroll-события macOS в двух точках системной цепочки:
+`ScrollProbe.app` измеряет и экспериментально фильтрует scroll-события macOS в
+двух точках системной цепочки:
 
-- ingress: `kCGHIDEventTap + headInsert + default`, событие всегда возвращается;
+- ingress: `kCGHIDEventTap + headInsert + default`, принимает решение pass/drop;
 - downstream: `kCGAnnotatedSessionEventTap + tailAppend + listenOnly`.
 
-Текущая версия работает только в monitor-only режиме. Она не изменяет, не
-дропает и не синтезирует события.
+ScrollProbe никогда не синтезирует события и не изменяет delta/phase существующих
+событий.
+
+## Режимы
+
+- `Monitor only`: пропускает все события и только измеряет их.
+- `Drop zero-delta changed events`: удаляет только события без любой delta с
+  `scrollPhase=changed` и без momentum phase. Begin/end/cancel, momentum и все
+  события с реальным перемещением сохраняются.
+- `Drop all`: удаляет все scroll events в течение 10 секунд после установки
+  taps, затем автоматически продолжает в monitor-only режиме.
+
+Экспериментальные drop-режимы доступны только для guest-профилей. Выбранный и
+фактически активный mode записывается соответственно в `run-start` и каждую
+`metrics`-запись.
 
 ## Сборка
 
@@ -44,7 +58,7 @@ HID tap, а downstream listen-only tap подтвержденно работае
 permission flow в приложении нет.
 
 Работоспособность определяется не текстом permission label, а фактом, что после
-`Start monitor` растут одновременно `ingress.totalObserved` и
+`Start` растут одновременно `ingress.totalObserved` и
 `downstream.totalObserved`.
 
 ## Перенос в guest
@@ -71,17 +85,23 @@ xattr -dr com.apple.quarantine "$HOME/Applications/ScrollProbe.app"
 
 ## Логи
 
-Каждый запуск monitor создает JSONL:
+Каждый запуск создает JSONL. Каталог по умолчанию:
 
 ```text
 ~/Library/Logs/ScrollProbe/scrollprobe-<UTC>-<RUN_ID>.jsonl
 ```
 
+Кнопка `Choose log folder...` позволяет выбрать и сохранить другой каталог,
+включая доступный из guest shared-каталог репозитория `logs/`. Если запись в
+выбранный каталог перестает работать, run завершается с ошибкой вместо тихой
+потери данных.
+
 Типы записей:
 
-- `run-start`: ОС, host, PID, scenario и конфигурация taps;
+- `run-start`: версия app, ОС, host, PID, profile, mode и конфигурация taps;
 - `tap-inventory`: зарегистрированные taps и процессы;
-- `metrics`: секундные агрегаты;
+- `metrics`: секундные агрегаты и фактически активный mode;
+- `mode-change`: автоматическое завершение временного drop-all;
 - `run-stop` или `error`.
 
 `CGGetEventTapList` сбрасывает min/max latency counters системных taps, поэтому
@@ -89,7 +109,8 @@ inventory нужно делать только в заранее отмечен�
 
 ## Первый baseline
 
-Для каждого сценария используется отдельный run. Сценарии, направленные в
+Для каждого сценария используется отдельный run. Profile выбирается из списка,
+а UI показывает paired profile и порядок действий. Сценарии, направленные в
 guest, записываются одновременно двумя экземплярами ScrollProbe:
 
 | Действие | Scenario на host | Scenario в guest |
@@ -134,4 +155,6 @@ control используется один дискретный шаг колес
   momentum.
 - Совпадение host и guest event count не исключает патологию в phase/delta
   semantics.
-- Переход к drop-all или throttling выполняется только после monitor baseline.
+- Два парных monitor baseline уже подтвердили amplification. Следующий
+  эксперимент выполняется с targeted zero-delta filter, а drop-all остается
+  отдельной проверкой того, что Horizon не обходит ingress tap.

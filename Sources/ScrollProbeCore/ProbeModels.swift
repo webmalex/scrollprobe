@@ -80,7 +80,9 @@ public struct ScrollSample: Codable, Equatable, Sendable {
     }
 
     public var isZeroDeltaChanged: Bool {
-        !hasAnyDelta && scrollPhase == Int64(CGScrollPhase.changed.rawValue)
+        !hasAnyDelta &&
+            scrollPhase == Int64(CGScrollPhase.changed.rawValue) &&
+            momentumPhase == 0
     }
 }
 
@@ -120,6 +122,7 @@ public struct ProbeMetricsSnapshot: Codable, Equatable, Sendable {
     public let runID: UUID
     public let timestamp: Date
     public let intervalSeconds: Double
+    public let mode: ProbeMode
     public let ingress: StageMetrics
     public let downstream: StageMetrics
 }

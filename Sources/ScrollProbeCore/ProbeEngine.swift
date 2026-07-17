@@ -61,9 +61,15 @@ public final class ProbeEngine {
             throw ProbeEngineError.accessibilityPermissionMissing
         }
 
-        updateState(.starting, message: "Creating event taps...")
         let runID = UUID()
-        let logger = try RunLogger(runID: runID, directory: logDirectory)
+        let logger = try RunLogger(
+            runID: runID,
+            directory: logDirectory,
+            errorHandler: { [weak self] error in
+                self?.handleFatalTapFault("Log writer fault: \(error.localizedDescription)")
+            }
+        )
+        updateState(.starting, message: "Creating event taps...")
         let startedAt = Date()
         let metadata = ProbeRunMetadata(
             runID: runID,
@@ -90,10 +96,7 @@ public final class ProbeEngine {
         self.logURL = logger.fileURL
         self.eventThread = eventThread
         activeMode = mode
-        dropAllDeadlineUptimeNanos = mode == .dropAll
-            ? DispatchTime.now().uptimeNanoseconds +
-                UInt64(ProbeMode.dropAllDurationSeconds) * UInt64(NSEC_PER_SEC)
-            : nil
+        dropAllDeadlineUptimeNanos = nil
         eventThread.start()
 
         do {
@@ -109,11 +112,13 @@ public final class ProbeEngine {
         }
 
         updateState(.monitoring, message: Self.statusMessage(for: mode))
-        DispatchQueue.global(qos: .utility).async { [weak self, logger] in
+        DispatchQueue.global(qos: .utility).async { [weak self, logger, mode] in
             do {
                 let taps = try TapInventory.snapshot()
                 logger.write(ProbeLogRecord(type: "tap-inventory", runID: runID, taps: taps, label: "after-start"))
-                self?.publishStatusIfMonitoring("Monitoring started with \(taps.count) registered event taps.")
+                self?.publishStatusIfMonitoring(
+                    "\(Self.statusMessage(for: mode)) Registered event taps: \(taps.count)."
+                )
             } catch {
                 self?.publishStatusIfMonitoring("Monitoring started; event tap inventory failed: \(error.localizedDescription)")
             }
@@ -213,6 +218,11 @@ public final class ProbeEngine {
         }
         snapshotTimer = timer
         RunLoop.current.add(timer, forMode: .common)
+
+        if activeMode == .dropAll {
+            dropAllDeadlineUptimeNanos = DispatchTime.now().uptimeNanoseconds +
+                UInt64(ProbeMode.dropAllDurationSeconds) * UInt64(NSEC_PER_SEC)
+        }
     }
 
     private func handleIngress(_ event: CGEvent) -> TapDecision {
@@ -243,7 +253,7 @@ public final class ProbeEngine {
 
     private func publishMetricsSnapshot() {
         expireDropAllIfNeeded(nowUptimeNanos: DispatchTime.now().uptimeNanoseconds)
-        guard let snapshot = metrics?.takeSnapshot() else {
+        guard let snapshot = metrics?.takeSnapshot(mode: activeMode) else {
             return
         }
         logger?.write(ProbeLogRecord(type: "metrics", runID: snapshot.runID, metrics: snapshot))

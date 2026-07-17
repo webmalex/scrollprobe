@@ -331,18 +331,20 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | ScrollProbe monitor | Реализован, host smoke test пройден |
 | Переносимый guest bundle | Готов, `dist/ScrollProbe-macos-arm64.zip` |
 | Парные host/guest runs | Два run, amplification 155 -> 4750 и 162 -> 5269 |
-| Drop-all bypass test | Не начат |
-| Zero-delta changed filter | Следующий эксперимент, сигнал подтвержден |
+| Drop-all bypass mode | Реализован в v0.2.0, guest test не выполнен |
+| Zero-delta changed filter | Реализован в v0.2.0, guest test не выполнен |
 | Throttling filter | Не начат, после targeted zero-delta filter |
 | IOHID/DriverKit | Не начат, заблокирован bypass test |
 
 ## Следующий шаг
 
-Не требовать полного повторения всей матрицы. Добавить в ScrollProbe ограниченный
-drop-all и отдельный targeted режим, который подавляет только zero-delta
-`scrollPhase=changed` events, сохраняя begin/end/cancel, ненулевые delta и все
-momentum events. Сначала проверить downstream count в обычном guest приложении,
-затем одним прогоном в уже подключенном Horizon проверить влияние на freeze.
+Не требовать полного повторения всей матрицы. Скопировать ScrollProbe v0.2.0 в
+guest и выбрать shared `logs/` через UI. С выключенным LinearMouse выполнить
+один парный Windows Horizon run в режиме `Drop zero-delta changed events` только
+на guest; host остается в `Monitor only`. Проверить, уменьшился ли downstream с
+тысяч событий примерно до числа событий с реальной delta и исчез ли freeze.
+Drop-all оставить следующим диагностическим режимом, если targeted filter не
+останавливает доставку патологического burst в Horizon.
 
 ## Smoke test ScrollProbe 2026-07-17
 
@@ -414,19 +416,26 @@ LinearMouse был завершен через его menu item. Guest `tap-inve
 удалении тысяч zero-delta changed events при сохранении жизненного цикла gesture
 и всех событий, несущих реальную delta.
 
-## UX-задачи ScrollProbe
+## UX ScrollProbe v0.2.0
 
-Перед оставшимися ручными экспериментами:
+Перед следующими ручными экспериментами реализовано:
 
-1. Заменить свободный ввод scenario на список преднастроенных сценариев с
-   optional custom variant.
-2. Показывать version/build в окне и записывать их в `run-start`.
-3. Показывать роль host/guest, paired scenario и следующий шаг эксперимента
-   непосредственно в UI.
-4. Добавить выбираемый и сохраняемый каталог логов. Для общей папки репозитория
-   это проще и надежнее, чем rsync из guest.
-5. Не требовать перезагрузки VM/VPN между прогонами, если изменяемый фактор этого
-   не требует; состояние окружения фиксировать в scenario или metadata.
+1. Свободный ввод scenario заменен списком преднастроенных host/guest profiles.
+2. Version/build показывается в окне и записывается в `run-start`.
+3. UI показывает роль host/guest, paired profile, номер Start step и полный
+   порядок одного controlled gesture.
+4. Добавлен выбираемый и сохраняемый каталог логов. Ошибка записи завершает run,
+   а не оставляет тихо поврежденный JSONL.
+5. Drop-режимы разрешены только для guest profiles. Drop-all автоматически
+   возвращается в monitor mode через 10 секунд; effective mode есть в каждой
+   metrics-записи.
+6. Приложение не требует перезагрузки VM/VPN между прогонами, если изменяемый
+   фактор этого не требует.
+
+Полная автоматическая синхронизация двух приложений между host и guest пока не
+реализована. Для текущего targeted теста достаточно статических paired
+инструкций; отдельный shared-state wizard имеет смысл только если ручных
+сценариев снова станет много.
 
 ## TCC и локальная подпись
 

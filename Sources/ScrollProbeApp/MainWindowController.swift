@@ -27,7 +27,7 @@ final class MainWindowController: NSWindowController {
         )
         window.title = "ScrollProbe \(Self.versionText)"
         window.center()
-        window.minSize = NSSize(width: 800, height: 640)
+        window.minSize = NSSize(width: 800, height: 700)
         super.init(window: window)
 
         configureUI()
@@ -144,8 +144,13 @@ final class MainWindowController: NSWindowController {
         logDirectoryLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         logDirectoryLabel.lineBreakMode = .byTruncatingMiddle
         logDirectoryLabel.stringValue = selectedLogDirectory.path
+        logDirectoryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         logDirectoryRow.addArrangedSubview(logDirectoryLabel)
-        logDirectoryLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 500).isActive = true
+        logDirectoryLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
+        logDirectoryLabel.widthAnchor.constraint(
+            lessThanOrEqualTo: root.widthAnchor,
+            constant: -220
+        ).isActive = true
         root.addArrangedSubview(logDirectoryRow)
 
         let monitorButtons = NSStackView()
@@ -202,8 +207,9 @@ final class MainWindowController: NSWindowController {
         scrollView.documentView = detailsTextView
         root.addArrangedSubview(scrollView)
         scrollView.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -40).isActive = true
-        scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
+        scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
 
+        updateModeAvailability()
         updateGuidance()
     }
 
@@ -294,6 +300,7 @@ final class MainWindowController: NSWindowController {
 
     @objc private func scenarioChanged() {
         UserDefaults.standard.set(selectedScenario.id, forKey: Self.scenarioDefaultsKey)
+        updateModeAvailability()
         updateGuidance()
     }
 
@@ -362,6 +369,16 @@ final class MainWindowController: NSWindowController {
         }
     }
 
+    private func updateModeAvailability() {
+        let guestModeAllowed = selectedScenario.role == .guest
+        for index in ProbeMode.allCases.indices where index > 0 {
+            modePopup.item(at: index)?.isEnabled = guestModeAllowed
+        }
+        if !guestModeAllowed, selectedMode != .monitor {
+            modePopup.selectItem(at: ProbeMode.allCases.firstIndex(of: .monitor) ?? 0)
+        }
+    }
+
     private func confirmDropAll() -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -414,6 +431,7 @@ final class MainWindowController: NSWindowController {
     private static func format(_ snapshot: ProbeMetricsSnapshot) -> String {
         [
             "run: \(snapshot.runID.uuidString)",
+            "mode: \(snapshot.mode.rawValue)",
             String(format: "interval: %.3f s", snapshot.intervalSeconds),
             "timestamp: \(snapshot.timestamp)",
             "",

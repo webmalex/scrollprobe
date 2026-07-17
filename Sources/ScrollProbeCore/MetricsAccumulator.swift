@@ -44,6 +44,7 @@ public final class MetricsAccumulator {
     }
 
     public func takeSnapshot(
+        mode: ProbeMode = .monitor,
         at timestamp: Date = Date(),
         uptimeNanos: UInt64 = DispatchTime.now().uptimeNanoseconds
     ) -> ProbeMetricsSnapshot {
@@ -53,6 +54,7 @@ public final class MetricsAccumulator {
             runID: runID,
             timestamp: timestamp,
             intervalSeconds: elapsedSeconds,
+            mode: mode,
             ingress: ingress.takeSnapshot(elapsedSeconds: elapsedSeconds),
             downstream: downstream.takeSnapshot(elapsedSeconds: elapsedSeconds)
         )

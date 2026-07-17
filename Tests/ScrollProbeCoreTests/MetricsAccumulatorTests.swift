@@ -34,8 +34,9 @@ final class MetricsAccumulatorTests: XCTestCase {
         accumulator.recordCallbackDuration(stage: .downstream, nanoseconds: 5_000)
         accumulator.recordDisabled(stage: .ingress, reason: .timeout)
 
-        let first = accumulator.takeSnapshot(uptimeNanos: 2_000_000_000)
+        let first = accumulator.takeSnapshot(mode: .dropZeroDeltaChanged, uptimeNanos: 2_000_000_000)
 
+        XCTAssertEqual(first.mode, .dropZeroDeltaChanged)
         XCTAssertEqual(first.ingress.observed, 2)
         XCTAssertEqual(first.ingress.returned, 1)
         XCTAssertEqual(first.ingress.dropped, 1)

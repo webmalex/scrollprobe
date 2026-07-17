@@ -2,11 +2,14 @@ import Foundation
 
 public enum RunLoggerError: LocalizedError {
     case cannotCreateLogFile(URL)
+    case writeFailed(URL, String)
 
     public var errorDescription: String? {
         switch self {
         case let .cannotCreateLogFile(url):
             return "Cannot create log file at \(url.path)."
+        case let .writeFailed(url, message):
+            return "Cannot write log file at \(url.path): \(message)"
         }
     }
 }
@@ -22,9 +25,15 @@ public final class RunLogger {
     private let queue = DispatchQueue(label: "dev.scrollprobe.log-writer", qos: .utility)
     private let queueKey = DispatchSpecificKey<Void>()
     private let fileHandle: FileHandle
+    private let errorHandler: (Error) -> Void
     private var isClosed = false
+    private var didReportWriteFailure = false
 
-    public init(runID: UUID, directory: URL = RunLogger.defaultLogDirectory) throws {
+    public init(
+        runID: UUID,
+        directory: URL = RunLogger.defaultLogDirectory,
+        errorHandler: @escaping (Error) -> Void = { _ in }
+    ) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let formatter = DateFormatter()
@@ -39,6 +48,7 @@ public final class RunLogger {
             throw RunLoggerError.cannotCreateLogFile(fileURL)
         }
         fileHandle = handle
+        self.errorHandler = errorHandler
         queue.setSpecific(key: queueKey, value: ())
     }
 
@@ -58,7 +68,11 @@ public final class RunLogger {
                 return
             }
             data.append(0x0A)
-            try? self.fileHandle.write(contentsOf: data)
+            do {
+                try self.fileHandle.write(contentsOf: data)
+            } catch {
+                self.reportWriteFailure(error)
+            }
         }
     }
 
@@ -77,7 +91,23 @@ public final class RunLogger {
             return
         }
         isClosed = true
-        try? fileHandle.synchronize()
-        try? fileHandle.close()
+        do {
+            try fileHandle.synchronize()
+        } catch {
+            reportWriteFailure(error)
+        }
+        do {
+            try fileHandle.close()
+        } catch {
+            reportWriteFailure(error)
+        }
+    }
+
+    private func reportWriteFailure(_ error: Error) {
+        guard !didReportWriteFailure else {
+            return
+        }
+        didReportWriteFailure = true
+        errorHandler(RunLoggerError.writeFailed(fileURL, error.localizedDescription))
     }
 }
