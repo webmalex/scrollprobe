@@ -112,7 +112,9 @@ WindowServer/Horizon последовательность continuous/phase/momen
 Проблемой может быть не количество, а сочетание полей и фаз.
 
 За: direct host Horizon исправен; проблема появляется только после границы
-host -> guest; известны похожие UTM/AVF freeze.
+host -> guest; известны похожие UTM/AVF freeze. Два парных run показали, что
+обычные host `scrollPhase=changed` events превращаются в тысячи почти полностью
+zero-delta changed events уже на guest HID ingress.
 
 Против: `Generic Mouse` не устранил симптом, хотя должен менять тип виртуального
 устройства.
@@ -122,15 +124,27 @@ host -> guest; известны похожие UTM/AVF freeze.
 AVF, guest WindowServer или другой компонент может превращать один физический
 gesture в чрезмерное число `scrollWheel` events.
 
-За: субъективное поведение и частичное улучшение после отключения инерции.
+За: два парных trackpad run показали 155 -> 4750 и 162 -> 5269 событий между
+host и guest ingress. Амплификация воспроизводится с включенным и полностью
+завершенным LinearMouse. Точный виновник внутри host -> AVF -> guest цепочки еще
+не локализован, но сам факт амплификации доказан.
 
-Против: численные данные пока отсутствуют.
+Против: пока измерен только проблемный путь trackpad через guest Horizon;
+стабильный mouse control численно не снят.
 
 ### H3. LinearMouse меняет delta, но не снижает event rate
 
 Дискретизация каждого микро-события может оставлять прежнюю частоту или даже
 усиливать фактическую прокрутку, превращая малую дробную delta в отдельный line
 step. Нужен отдельный accumulator/rate limiter, а не только line translation.
+
+Первый парный run подтверждает эту часть гипотезы: guest ingress увидел 4750
+событий, а downstream после LinearMouse 4647. LinearMouse удалил 103 momentum
+events, но пропустил 4646 scroll-phase events, из которых 4645 имели нулевую
+delta. Второй run без процесса и tap LinearMouse всё равно дал 5269 ingress
+events. Следовательно, LinearMouse не создает amplification, а его line/no
+inertia mode только удаляет полезные momentum events, не ограничивая основной
+zero-delta burst.
 
 ### H4. Клиентское взаимодействие Horizon и WindowServer
 
@@ -316,18 +330,19 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | Архитектура ScrollProbe | Утверждена, public API baseline |
 | ScrollProbe monitor | Реализован, host smoke test пройден |
 | Переносимый guest bundle | Готов, `dist/ScrollProbe-macos-arm64.zip` |
+| Парные host/guest runs | Два run, amplification 155 -> 4750 и 162 -> 5269 |
 | Drop-all bypass test | Не начат |
-| Throttling filter | Не начат, заблокирован измерениями |
+| Zero-delta changed filter | Следующий эксперимент, сигнал подтвержден |
+| Throttling filter | Не начат, после targeted zero-delta filter |
 | IOHID/DriverKit | Не начат, заблокирован bypass test |
 
 ## Следующий шаг
 
-Перенести готовый архив в guest и повторить стандартизованный baseline по
-инструкции `README.md`, включая direct host Horizon, guest native app, оба guest
-VDI и Bluetooth-мышь. Guest-сценарии записывать одновременно на host и guest,
-чтобы одна физическая прокрутка дала сопоставимую пару логов. До добавления
-drop-all сначала сравнить cumulative event count, rate, delta и phases между
-этими сценариями.
+Не требовать полного повторения всей матрицы. Добавить в ScrollProbe ограниченный
+drop-all и отдельный targeted режим, который подавляет только zero-delta
+`scrollPhase=changed` events, сохраняя begin/end/cancel, ненулевые delta и все
+momentum events. Сначала проверить downstream count в обычном guest приложении,
+затем одним прогоном в уже подключенном Horizon проверить влияние на freeze.
 
 ## Smoke test ScrollProbe 2026-07-17
 
@@ -345,6 +360,73 @@ drop-all сначала сравнить cumulative event count, rate, delta и 
 
 Это только host smoke test без стандартизованного одного gesture. Он не
 подтверждает и не опровергает amplification на границе host -> guest.
+
+## Первый парный host/guest run 2026-07-17
+
+Пара сценариев была вручную ошибочно отмечена как
+`host-to-guest-horizon-windows-mouse-linearmouse` и
+`guest-horizon-windows-mouse-linearmouse`:
+
+1. Host ingress/downstream: 155/155 events, peak около 134/s.
+2. Guest ingress: 4750 events, peak около 4679/s, то есть в 30,6 раза больше
+   cumulative и примерно в 35 раз больше по peak rate.
+3. Host имел 49 `scrollPhase=changed` events, guest 4643, рост в 94,8 раза.
+4. На host только 3 из 155 событий имели нулевую delta. На guest таких событий
+   было 4647 из 4750, или 97,8%.
+5. Guest LinearMouse сократил downstream только до 4647 events. Он удалил все
+   103 momentum events, но пропустил phase burst; downstream содержал всего одно
+   ненулевое событие с суммарным `pointDeltaY=8`.
+6. Probe tap не получил timeout или disable. В inventory LinearMouse tap имел
+   подозрительное latency value около 66,2 миллионов микросекунд; значение пока
+   нельзя интерпретировать как длительность конкретного freeze.
+
+Фактически использовался trackpad и наблюдался обычный многосекундный freeze.
+Это первое прямое доказательство сильной амплификации между host и guest. Оно
+также объясняет, почему отключение momentum в LinearMouse могло улучшать сеть,
+но не устранять UI freeze: основной zero-delta phase burst оставался.
+
+## Парный run без LinearMouse 2026-07-17
+
+LinearMouse был завершен через его menu item. Guest `tap-inventory` подтверждает,
+что процесса и event tap LinearMouse в момент run не было. Scenario снова был
+вручную ошибочно назван как mouse, фактический input был trackpad, а результатом
+был стандартный многосекундный freeze.
+
+1. Host ingress/downstream: 162/162 events, peak около 138/s.
+2. Guest ingress/downstream: 5269/5269 events, cumulative amplification в 32,5
+   раза.
+3. Peak guest ingress около 5160/s против 138/s на host, рост в 37,4 раза.
+4. Host имел 41 `scrollPhase=changed` event, guest 5147, рост в 125,5 раза.
+5. Guest ingress содержал 5151 zero-delta events из 5269, или 97,8%.
+6. Все 118 momentum events и суммарные delta совпали между guest ingress и
+   downstream. Без LinearMouse ничего намеренно не удалялось.
+7. В первую секунду burst guest ingress получил 5152 events, downstream успел
+   обработать 4041. В следующую секунду ingress получил 110, а downstream 1221,
+   то есть downstream догнал очередь ровно на 1111 events.
+8. Средний inter-arrival внутри основного ingress burst был около 52 мкс, minimum
+   около 5,5 мкс. Поэтому instantaneous rate внутри плотной части burst заметно
+   выше секундного агрегата 5160/s.
+9. Timeout или disable taps ScrollProbe не зарегистрированы.
+
+Контроль без LinearMouse исключает его как источник amplification. Burst уже
+присутствует в самом раннем доступном guest CGEventTap и создает измеримую очередь
+до downstream tap. Наиболее узкий безопасный первый workaround состоит в
+удалении тысяч zero-delta changed events при сохранении жизненного цикла gesture
+и всех событий, несущих реальную delta.
+
+## UX-задачи ScrollProbe
+
+Перед оставшимися ручными экспериментами:
+
+1. Заменить свободный ввод scenario на список преднастроенных сценариев с
+   optional custom variant.
+2. Показывать version/build в окне и записывать их в `run-start`.
+3. Показывать роль host/guest, paired scenario и следующий шаг эксперимента
+   непосредственно в UI.
+4. Добавить выбираемый и сохраняемый каталог логов. Для общей папки репозитория
+   это проще и надежнее, чем rsync из guest.
+5. Не требовать перезагрузки VM/VPN между прогонами, если изменяемый фактор этого
+   не требует; состояние окружения фиксировать в scenario или metadata.
 
 ## TCC и локальная подпись
 

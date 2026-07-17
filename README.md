@@ -52,14 +52,15 @@ permission flow в приложении нет.
 Собирать приложение в guest не нужно. Host и guest используют Apple Silicon и
 macOS 15, поэтому в обеих системах запускается один и тот же собранный bundle.
 
-1. Скопировать `dist/ScrollProbe-macos-arm64.zip` в guest.
-2. Распаковать архив и перенести `ScrollProbe.app` в `~/Applications` или
-   `/Applications`. Не запускать его прямо из UTM shared directory.
-3. Первый раз запустить через Finder командой `Open` из контекстного меню.
-4. Выдать Accessibility внутри guest и при необходимости перезапустить app.
+1. Скопировать `dist/ScrollProbe.app` из UTM shared directory в
+   `~/Applications` или `/Applications`. Прямое копирование bundle достаточно.
+2. Первый раз запустить через Finder командой `Open` из контекстного меню.
+3. Выдать Accessibility внутри guest и при необходимости перезапустить app.
 
 TCC-базы host и guest независимы, поэтому право выдается один раз в каждой ОС.
-Xcode, Swift и остальные инструменты сборки в guest не требуются.
+Xcode, Swift и остальные инструменты сборки в guest не требуются. ZIP от
+`make package` является только запасным способом переноса для файловых систем,
+которые повреждают структуру bundle или executable attributes.
 
 Если macOS сохранила quarantine attribute и продолжает блокировать локальный
 диагностический bundle, удалить его уже после копирования в `~/Applications`:
@@ -121,8 +122,8 @@ control используется один дискретный шаг колес
 с LinearMouse выполняются позднее с дополнительным суффиксом scenario, например
 `guest-horizon-ubuntu-trackpad-linearmouse`.
 
-Один и тот же архив следует использовать на host и guest, чтобы сравнивать
-одинаковый код. До завершения baseline его не следует пересобирать.
+Один и тот же собранный bundle следует использовать на host и guest, чтобы
+сравнивать одинаковый код. До завершения baseline его не следует пересобирать.
 
 ## Интерпретация
 
