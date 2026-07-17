@@ -144,7 +144,7 @@ opaque multi-touch path, который нельзя нормализовать 
 `ScrollProbe.app` должен быть независимым, unsandboxed и минимальным:
 
 1. Deployment target macOS 15.0.
-2. Стабильные bundle identifier, подпись и путь установки для TCC.
+2. Стабильные bundle identifier, designated requirement и путь установки для TCC.
 3. Видимое окно или status UI, особенно для drop-all режима.
 4. Ingress: `kCGHIDEventTap + headInsert + default`, только scroll mask.
 5. Downstream: configurable listen-only tail, сначала annotated-session.

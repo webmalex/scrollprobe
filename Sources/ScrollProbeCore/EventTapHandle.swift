@@ -7,7 +7,7 @@ enum EventTapHandleError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case let .creationFailed(name):
-            return "Failed to create the \(name) event tap. Check Accessibility and Input Monitoring permissions."
+            return "Failed to create the \(name) event tap. Check Accessibility permission."
         }
     }
 }

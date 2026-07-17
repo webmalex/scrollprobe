@@ -1,5 +1,4 @@
 import ApplicationServices
-import CoreGraphics
 import Foundation
 
 public enum EventAccess {
@@ -14,14 +13,5 @@ public enum EventAccess {
         AXIsProcessTrustedWithOptions([
             kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true,
         ] as CFDictionary)
-    }
-
-    public static var listenEnabled: Bool {
-        CGPreflightListenEventAccess()
-    }
-
-    @discardableResult
-    public static func requestListenAccess() -> Bool {
-        CGRequestListenEventAccess()
     }
 }

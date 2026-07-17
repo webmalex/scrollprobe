@@ -21,7 +21,8 @@ app: build
 	mkdir -p "$(CONTENTS_DIR)/MacOS"
 	cp "$(SWIFT_BUILD_DIR)/$(APP_NAME)" "$(CONTENTS_DIR)/MacOS/$(APP_NAME)"
 	cp "Resources/Info.plist" "$(CONTENTS_DIR)/Info.plist"
-	codesign --force --sign - --identifier "$(BUNDLE_ID)" "$(APP_DIR)"
+	codesign --force --sign - --identifier "$(BUNDLE_ID)" \
+		--requirements '=designated => identifier "$(BUNDLE_ID)"' "$(APP_DIR)"
 
 run: app
 	open "$(APP_DIR)"

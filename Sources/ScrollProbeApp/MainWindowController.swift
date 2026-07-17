@@ -84,7 +84,6 @@ final class MainWindowController: NSWindowController {
 
         let permissionButtons = NSStackView(views: [
             button("Request Accessibility", action: #selector(requestAccessibility)),
-            button("Request Input Monitoring", action: #selector(requestInputMonitoring)),
         ])
         permissionButtons.orientation = .horizontal
         permissionButtons.spacing = 8
@@ -176,9 +175,7 @@ final class MainWindowController: NSWindowController {
 
     private func refreshPermissionStatus() {
         let accessibility = EventAccess.accessibilityEnabled ? "granted" : "missing"
-        let listening = EventAccess.listenEnabled ? "granted" : "missing"
-        permissionLabel.stringValue =
-            "Accessibility: \(accessibility)    Input Monitoring API: \(listening) (optional for current taps)"
+        permissionLabel.stringValue = "Accessibility: \(accessibility)    Input Monitoring: not required"
     }
 
     private func updateButtons(for state: ProbeEngineState) {
@@ -191,17 +188,6 @@ final class MainWindowController: NSWindowController {
     @objc private func requestAccessibility() {
         EventAccess.requestAccessibility()
         refreshPermissionStatus()
-    }
-
-    @objc private func requestInputMonitoring() {
-        let granted = EventAccess.requestListenAccess()
-        refreshPermissionStatus()
-        if granted {
-            stateLabel.stringValue = "Input Monitoring access is already available."
-        } else {
-            stateLabel.stringValue = "Input Monitoring was not granted; opened System Settings."
-            openPrivacySettings(anchor: "Privacy_ListenEvent")
-        }
     }
 
     @objc private func startMonitoring() {
@@ -257,15 +243,6 @@ final class MainWindowController: NSWindowController {
         let label = NSTextField(wrappingLabelWithString: text)
         label.textColor = .secondaryLabelColor
         return label
-    }
-
-    private func openPrivacySettings(anchor: String) {
-        guard let url = URL(
-            string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)"
-        ) else {
-            return
-        }
-        NSWorkspace.shared.open(url)
     }
 
     private static func format(_ snapshot: ProbeMetricsSnapshot) -> String {
