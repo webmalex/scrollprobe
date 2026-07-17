@@ -112,15 +112,16 @@ public final class ProbeEngine {
         }
 
         updateState(.monitoring, message: Self.statusMessage(for: mode))
-        DispatchQueue.global(qos: .utility).async { [weak self, logger, mode] in
+        DispatchQueue.global(qos: .utility).async { [logger] in
             do {
                 let taps = try TapInventory.snapshot()
                 logger.write(ProbeLogRecord(type: "tap-inventory", runID: runID, taps: taps, label: "after-start"))
-                self?.publishStatusIfMonitoring(
-                    "\(Self.statusMessage(for: mode)) Registered event taps: \(taps.count)."
-                )
             } catch {
-                self?.publishStatusIfMonitoring("Monitoring started; event tap inventory failed: \(error.localizedDescription)")
+                logger.write(ProbeLogRecord(
+                    type: "tap-inventory-error",
+                    runID: runID,
+                    message: error.localizedDescription
+                ))
             }
         }
     }
@@ -154,14 +155,21 @@ public final class ProbeEngine {
         if let runID {
             logger?.write(ProbeLogRecord(type: "run-stop", runID: runID, message: message))
         }
-        logger?.close()
+        var resolvedState = finalState
+        var resolvedMessage = message
+        do {
+            try logger?.close()
+        } catch {
+            resolvedState = .failed
+            resolvedMessage = "Log writer fault: \(error.localizedDescription)"
+        }
         logger = nil
         eventThread = nil
         metrics = nil
         runID = nil
         activeMode = .monitor
         dropAllDeadlineUptimeNanos = nil
-        updateState(finalState, message: message)
+        updateState(resolvedState, message: resolvedMessage)
     }
 
     @discardableResult
@@ -178,23 +186,6 @@ public final class ProbeEngine {
     }
 
     private func installTapsAndTimer() throws {
-        ingressTap = try EventTapHandle(
-            name: "ingress",
-            stage: .ingress,
-            location: .cghidEventTap,
-            placement: .headInsertEventTap,
-            options: .defaultTap,
-            eventHandler: { [weak self] event in
-                self?.handleIngress(event) ?? .pass
-            },
-            disabledHandler: { [weak self] reason in
-                self?.metrics?.recordDisabled(stage: .ingress, reason: reason)
-            },
-            faultHandler: { [weak self] message in
-                self?.handleFatalTapFault("Ingress tap fault: \(message)")
-            }
-        )
-
         downstreamTap = try EventTapHandle(
             name: "downstream",
             stage: .downstream,
@@ -213,16 +204,34 @@ public final class ProbeEngine {
             }
         )
 
+        if activeMode == .dropAll {
+            dropAllDeadlineUptimeNanos = DispatchTime.now().uptimeNanoseconds +
+                UInt64(ProbeMode.dropAllDurationSeconds) * UInt64(NSEC_PER_SEC)
+        }
+
+        ingressTap = try EventTapHandle(
+            name: "ingress",
+            stage: .ingress,
+            location: .cghidEventTap,
+            placement: .headInsertEventTap,
+            options: .defaultTap,
+            eventHandler: { [weak self] event in
+                self?.handleIngress(event) ?? .pass
+            },
+            disabledHandler: { [weak self] reason in
+                self?.metrics?.recordDisabled(stage: .ingress, reason: reason)
+            },
+            faultHandler: { [weak self] message in
+                self?.handleFatalTapFault("Ingress tap fault: \(message)")
+            }
+        )
+
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             self?.publishMetricsSnapshot()
         }
         snapshotTimer = timer
         RunLoop.current.add(timer, forMode: .common)
 
-        if activeMode == .dropAll {
-            dropAllDeadlineUptimeNanos = DispatchTime.now().uptimeNanoseconds +
-                UInt64(ProbeMode.dropAllDurationSeconds) * UInt64(NSEC_PER_SEC)
-        }
     }
 
     private func handleIngress(_ event: CGEvent) -> TapDecision {
@@ -252,8 +261,15 @@ public final class ProbeEngine {
     }
 
     private func publishMetricsSnapshot() {
-        expireDropAllIfNeeded(nowUptimeNanos: DispatchTime.now().uptimeNanoseconds)
-        guard let snapshot = metrics?.takeSnapshot(mode: activeMode) else {
+        let nowUptimeNanos = DispatchTime.now().uptimeNanoseconds
+        if expireDropAllIfNeeded(nowUptimeNanos: nowUptimeNanos) {
+            return
+        }
+        publishMetricsSnapshot(mode: activeMode, nowUptimeNanos: nowUptimeNanos)
+    }
+
+    private func publishMetricsSnapshot(mode: ProbeMode, nowUptimeNanos: UInt64) {
+        guard let snapshot = metrics?.takeSnapshot(mode: mode, uptimeNanos: nowUptimeNanos) else {
             return
         }
         logger?.write(ProbeLogRecord(type: "metrics", runID: snapshot.runID, metrics: snapshot))
@@ -277,7 +293,7 @@ public final class ProbeEngine {
         if let runID {
             logger?.write(ProbeLogRecord(type: "error", runID: runID, message: message))
         }
-        logger?.close()
+        try? logger?.close()
         logger = nil
         eventThread = nil
         metrics = nil
@@ -286,12 +302,14 @@ public final class ProbeEngine {
         updateState(.failed, message: message)
     }
 
-    private func expireDropAllIfNeeded(nowUptimeNanos: UInt64) {
+    @discardableResult
+    private func expireDropAllIfNeeded(nowUptimeNanos: UInt64) -> Bool {
         guard activeMode == .dropAll,
               let deadline = dropAllDeadlineUptimeNanos,
               nowUptimeNanos >= deadline else {
-            return
+            return false
         }
+        publishMetricsSnapshot(mode: .dropAll, nowUptimeNanos: nowUptimeNanos)
         activeMode = .monitor
         dropAllDeadlineUptimeNanos = nil
         if let runID {
@@ -302,6 +320,7 @@ public final class ProbeEngine {
             ))
         }
         publishStatusIfMonitoring("Drop-all expired; monitor-only mode is now active.")
+        return true
     }
 
     private func updateState(_ state: ProbeEngineState, message: String) {

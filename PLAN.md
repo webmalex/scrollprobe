@@ -27,6 +27,19 @@ Host: macOS 15.7.7, Apple Silicon M1 Max
           -> Windows Server 2019
 ```
 
+## Терминология input path
+
+Нельзя смешивать физическое устройство и выбранное виртуальное устройство UTM:
+
+- `physical input`: встроенный trackpad или внешняя mouse;
+- `UTM pointer`: `Mac Trackpad` (`VZMacTrackpadConfiguration`) или
+  `Generic Mouse` (`VZUSBScreenCoordinatePointingDeviceConfiguration`);
+- `target`: guest native app, Ubuntu Horizon или Windows Horizon.
+
+Ранние scenario с суффиксом `mouse` были выбраны осознанно и означали UTM
+`Generic Mouse`, хотя физический scroll выполнялся trackpad. Новые diagnostics
+metadata должны хранить эти измерения отдельными полями вместо одного имени.
+
 ## Подтвержденные факты
 
 1. Bluetooth-мышь со стандартным колесом стабильно работает через всю вложенную
@@ -52,21 +65,31 @@ Host: macOS 15.7.7, Apple Silicon M1 Max
    инерции. Это улучшило сетевую стабильность, но не устранило UI freeze.
 10. Использовался workaround с открытым браузером, который меняет выраженность
     WindowServer/compositing-проблемы, но не устраняет корень.
+11. Парные runs доказали amplification между host и guest ingress. В зависимости
+    от gesture и UTM pointer один host trackpad stream превращался в 25-112 раз
+    больше guest scroll events, почти полностью zero-delta
+    `scrollPhase=changed`.
+12. LinearMouse исключен как источник amplification: burst одинаково появляется
+    при полностью завершенном процессе и отсутствующем event tap LinearMouse.
+13. Targeted filter, удаляющий только zero-delta `scrollPhase=changed` без
+    momentum, устраняет freeze в Ubuntu и Windows Horizon при UTM `Generic Mouse`
+    и `Mac Trackpad`.
+14. Stress runs с десятками тысяч событий не вызвали freeze или disable/timeout
+    ScrollProbe taps. Downstream peak после фильтра остался не выше примерно
+    97 events/s.
 
 ## Что пока не доказано
 
-1. Не измерено, сколько scroll-событий создается на host и сколько появляется
-   в guest.
-2. Не доказано, что AVF умножает количество событий.
-3. Не доказано, что Horizon получает сотни или тысячи событий. Большое число
-   сетевых display frames может быть следствием обработки скролла, а не прямым
-   отражением числа input events.
-4. Не известно, какие поля события являются триггером: частота, дробные delta,
-   `continuous`, gesture phase, momentum phase или IOHID payload.
-5. Не известно, получает ли Horizon scroll через обычную CGEvent/NSEvent цепочку,
-   собственный `CGEventTap` или прямой IOHID-клиент.
-6. Не установлено, возникает ли такой же WindowServer freeze при прокрутке
-   обычного приложения внутри guest без запущенного Horizon.
+1. Не локализован точный генератор amplification внутри закрытого пути
+   Virtualization.framework -> guest input stack.
+2. Не доказан точный внутренний механизм freeze в Horizon и последующей сетевой
+   деградации. Доказано только, что удаление патологических событий до Horizon
+   устраняет наблюдаемый freeze в тестовой топологии.
+3. Не снят численный stable control с физической Bluetooth-мышью при включенном
+   filter.
+4. Не выполнены working-day soak, sleep/wake, VM suspend/resume, login item и
+   update/TCC migration tests.
+5. Нет независимого подтверждения на других версиях macOS, UTM и Horizon.
 
 ## Уже исследованные upstream-факты
 
@@ -331,20 +354,18 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | ScrollProbe monitor | Реализован, host smoke test пройден |
 | Переносимый guest bundle | Готов, `dist/ScrollProbe-macos-arm64.zip` |
 | Парные host/guest runs | Два run, amplification 155 -> 4750 и 162 -> 5269 |
-| Drop-all bypass mode | Реализован в v0.2.0, guest test не выполнен |
-| Zero-delta changed filter | Реализован в v0.2.0, guest test не выполнен |
-| Throttling filter | Не начат, после targeted zero-delta filter |
-| IOHID/DriverKit | Не начат, заблокирован bypass test |
+| Drop-all bypass mode | Реализован, не нужен для рабочего workaround |
+| Zero-delta changed filter | Подтверждённый workaround, Ubuntu/Windows без freeze |
+| Menu-bar protection agent | Следующий этап для ежедневной работы |
+| Throttling filter | Не требуется при текущем targeted workaround |
+| IOHID/DriverKit | Не требуется при работающем CGEventTap workaround |
 
 ## Следующий шаг
 
-Не требовать полного повторения всей матрицы. Скопировать ScrollProbe v0.2.0 в
-guest и выбрать shared `logs/` через UI. С выключенным LinearMouse выполнить
-один парный Windows Horizon run в режиме `Drop zero-delta changed events` только
-на guest; host остается в `Monitor only`. Проверить, уменьшился ли downstream с
-тысяч событий примерно до числа событий с реальной delta и исчез ли freeze.
-Drop-all оставить следующим диагностическим режимом, если targeted filter не
-останавливает доставку патологического burst в Horizon.
+Сделать в том же приложении production-like `Protection` service без обязательных
+логов и downstream tap. Service должен жить независимо от diagnostics window,
+управляться из menu bar, показывать реальное состояние tap и сохранять явный
+выбор пользователя. Текущую форму оставить optional diagnostics window.
 
 ## Smoke test ScrollProbe 2026-07-17
 
@@ -416,6 +437,30 @@ LinearMouse был завершен через его menu item. Guest `tap-inve
 удалении тысяч zero-delta changed events при сохранении жизненного цикла gesture
 и всех событий, несущих реальную delta.
 
+## Подтверждение targeted workaround 2026-07-17
+
+Физическим input во всех строках был trackpad. Filter работал только в guest;
+host оставался monitor-only.
+
+| UTM pointer | Target | Host events | Guest ingress | Dropped | Downstream | Результат |
+|---|---|---:|---:|---:|---:|---|
+| Generic Mouse | Windows | 369 | 41495 | 41425 | 70 | freeze исчез |
+| Mac Trackpad | Windows, one gesture | 192 | 17184 | 17118 | 66 | freeze исчез |
+| Mac Trackpad | Ubuntu, stress | 891 | 40615 | 40137 | 472 | freeze отсутствует |
+| Mac Trackpad | Windows, stress | 1369 | 35250 | 34311 | 932 | freeze отсутствует |
+
+Дополнительный mixed guest stress run пропустил через ingress 180622 events,
+удалил 177530 и оставил около 3 тысяч downstream без freeze. Во всех чистых и
+stress runs отсутствовали timeout, disable и error records. Targeted filter
+снижает downstream с тысяч событий в секунду до обычных десятков, не удаляя
+momentum, lifecycle или события с любой реальной delta.
+
+В Windows иногда визуально не реагирует первый scroll после переключения. Лог
+показывает, что первый gesture не удаляется полностью: в одном run downstream
+получил сначала 30, затем 36 событий с ненулевой суммарной delta. Поэтому текущая
+гипотеза для этого малого эффекта - focus/warm-up Horizon или Windows, а не stuck
+filter. Наблюдение нужно сохранить для soak test, но оно не блокирует workaround.
+
 ## UX ScrollProbe v0.2.0
 
 Перед следующими ручными экспериментами реализовано:
@@ -436,6 +481,57 @@ LinearMouse был завершен через его menu item. Guest `tap-inve
 реализована. Для текущего targeted теста достаточно статических paired
 инструкций; отдельный shared-state wizard имеет смысл только если ручных
 сценариев снова станет много.
+
+## Путь от probe к продукту
+
+Принято направление: не создавать второе приложение. Один app bundle и один
+bundle ID означают одну Accessibility/TCC запись, один updater и невозможность
+конфликта двух active HID taps. Внутри одного приложения operational filter и
+diagnostics разделяются на независимые services.
+
+### Phase 0. Рабочий workaround сейчас
+
+ScrollProbe v0.2.0 можно оставить запущенным в guest в targeted filter mode.
+Недостатки: открытое окно, обязательный diagnostics logger и отсутствие
+автозапуска protection после reboot.
+
+### Phase 1. Work Agent
+
+1. Перенести ownership active filter tap из window controller в app coordinator.
+2. Добавить menu-bar status item: `Protected`, `Paused`, `Needs Accessibility`,
+   `Failed`.
+3. Добавить `Enable/Pause Protection`, `Open Diagnostics`, `Settings`, `Quit`.
+4. Protection path использует только active HID tap и минимальный classifier, не
+   создает JSONL и downstream tap.
+5. Закрытие diagnostics window не завершает приложение и не выключает protection.
+6. Сохранять только явный `protectionEnabled`; никогда не сохранять drop-all.
+7. При permission loss или неизвестной ошибке fail open и честно показывать
+   `Failed`, не блокируя scroll.
+
+### Phase 2. Always-on reliability
+
+1. Добавить opt-in `Launch at Login` через `SMAppService.mainApp`.
+2. Проверить reboot/login, sleep/wake, lock/unlock, VM suspend/resume и TCC revoke.
+3. Реализовать bounded tap recreate/re-enable и working-day soak.
+4. Diagnostics errors не должны останавливать production protection service.
+
+### Phase 3. Private beta
+
+1. Выбрать окончательные product name и bundle ID до внешней раздачи.
+2. Подписывать Developer ID с hardened runtime, timestamp, notarization и staple.
+3. Добавить MIT license, privacy statement, uninstall и Accessibility onboarding.
+4. Protection mode ничего не пишет на диск и не использует сеть. Diagnostics
+   opt-in, bounded и экспортируется с удалением hostname, user paths и inventory
+   посторонних security/VPN приложений.
+5. Проверить физическую mouse, horizontal scroll, momentum, slow/reverse gestures
+   и обновление beta поверх предыдущей версии с сохранением TCC/login state.
+
+### Phase 4. Public release
+
+Публиковать как experimental workaround для воспроизведенной патологии
+UTM/Apple Virtualization в явно перечисленной топологии, а не как универсальное
+исправление Horizon. Для Reddit приложить numbers, checksums, known limitations и
+исходный код; telemetry в первой публичной версии не добавлять.
 
 ## TCC и локальная подпись
 

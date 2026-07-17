@@ -115,6 +115,7 @@ final class MainWindowController: NSWindowController {
         modeRow.alignment = .centerY
         modeRow.spacing = 8
         modeRow.addArrangedSubview(NSTextField(labelWithString: "Mode:"))
+        modePopup.autoenablesItems = false
         modePopup.addItems(withTitles: ProbeMode.allCases.map(Self.modeTitle))
         modePopup.selectItem(at: ProbeMode.allCases.firstIndex(of: .monitor) ?? 0)
         modePopup.target = self
@@ -146,12 +147,12 @@ final class MainWindowController: NSWindowController {
         logDirectoryLabel.stringValue = selectedLogDirectory.path
         logDirectoryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         logDirectoryRow.addArrangedSubview(logDirectoryLabel)
+        root.addArrangedSubview(logDirectoryRow)
         logDirectoryLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 300).isActive = true
         logDirectoryLabel.widthAnchor.constraint(
             lessThanOrEqualTo: root.widthAnchor,
             constant: -220
         ).isActive = true
-        root.addArrangedSubview(logDirectoryRow)
 
         let monitorButtons = NSStackView()
         monitorButtons.orientation = .horizontal
@@ -250,6 +251,12 @@ final class MainWindowController: NSWindowController {
 
     @objc private func startMonitoring() {
         let mode = selectedMode
+        if selectedScenario.role != .guest, mode != .monitor {
+            stateLabel.stringValue = "failed: Drop modes are available only for guest profiles."
+            modePopup.selectItem(at: ProbeMode.allCases.firstIndex(of: .monitor) ?? 0)
+            updateGuidance()
+            return
+        }
         if mode == .dropAll, !confirmDropAll() {
             return
         }
@@ -505,7 +512,7 @@ final class MainWindowController: NSWindowController {
     }
 }
 
-private enum ScenarioRole {
+private enum ScenarioRole: Equatable {
     case standalone
     case hostForGuest
     case guest

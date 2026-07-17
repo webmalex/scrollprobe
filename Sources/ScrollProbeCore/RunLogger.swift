@@ -28,6 +28,7 @@ public final class RunLogger {
     private let errorHandler: (Error) -> Void
     private var isClosed = false
     private var didReportWriteFailure = false
+    private var firstWriteFailure: Error?
 
     public init(
         runID: UUID,
@@ -53,7 +54,7 @@ public final class RunLogger {
     }
 
     deinit {
-        close()
+        try? close()
     }
 
     public func write(_ record: ProbeLogRecord) {
@@ -64,7 +65,11 @@ public final class RunLogger {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.sortedKeys]
-            guard var data = try? encoder.encode(record) else {
+            var data: Data
+            do {
+                data = try encoder.encode(record)
+            } catch {
+                self.reportWriteFailure(error)
                 return
             }
             data.append(0x0A)
@@ -76,13 +81,19 @@ public final class RunLogger {
         }
     }
 
-    public func close() {
+    public func close() throws {
+        let error: Error?
         if DispatchQueue.getSpecific(key: queueKey) != nil {
             closeOnQueue()
+            error = firstWriteFailure
         } else {
-            queue.sync {
+            error = queue.sync {
                 closeOnQueue()
+                return firstWriteFailure
             }
+        }
+        if let error {
+            throw error
         }
     }
 
@@ -104,10 +115,14 @@ public final class RunLogger {
     }
 
     private func reportWriteFailure(_ error: Error) {
+        let failure = RunLoggerError.writeFailed(fileURL, error.localizedDescription)
+        if firstWriteFailure == nil {
+            firstWriteFailure = failure
+        }
         guard !didReportWriteFailure else {
             return
         }
         didReportWriteFailure = true
-        errorHandler(RunLoggerError.writeFailed(fileURL, error.localizedDescription))
+        errorHandler(failure)
     }
 }

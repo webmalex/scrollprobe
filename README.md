@@ -58,8 +58,8 @@ HID tap, а downstream listen-only tap подтвержденно работае
 permission flow в приложении нет.
 
 Работоспособность определяется не текстом permission label, а фактом, что после
-`Start` растут одновременно `ingress.totalObserved` и
-`downstream.totalObserved`.
+`Start` растет `ingress.totalObserved`. В monitor mode должен также расти
+`downstream.totalObserved`; в drop-all он намеренно остается неизменным.
 
 ## Перенос в guest
 
