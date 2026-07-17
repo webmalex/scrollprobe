@@ -1,20 +1,24 @@
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var windowController: MainWindowController?
+    private var coordinator: AppCoordinator?
 
     func applicationDidFinishLaunching(_: Notification) {
-        let windowController = MainWindowController()
-        self.windowController = windowController
-        windowController.showWindow(nil)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+        let coordinator = AppCoordinator()
+        self.coordinator = coordinator
+        coordinator.start()
     }
 
     func applicationWillTerminate(_: Notification) {
-        windowController?.stopMonitoring()
+        coordinator?.shutdown()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
-        true
+        false
+    }
+
+    func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows _: Bool) -> Bool {
+        coordinator?.showDiagnostics()
+        return true
     }
 }

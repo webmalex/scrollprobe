@@ -1,15 +1,44 @@
 # ScrollProbe
 
-`ScrollProbe.app` измеряет и экспериментально фильтрует scroll-события macOS в
-двух точках системной цепочки:
+`ScrollProbe.app` содержит два независимых режима работы:
 
-- ingress: `kCGHIDEventTap + headInsert + default`, принимает решение pass/drop;
-- downstream: `kCGAnnotatedSessionEventTap + tailAppend + listenOnly`.
+- `Protection`: постоянно удаляет доказанно патологические scroll events без
+  окна, JSONL и downstream tap;
+- `Diagnostics`: опциональное окно для парных host/guest измерений и
+  экспериментальных режимов.
 
 ScrollProbe никогда не синтезирует события и не изменяет delta/phase существующих
 событий.
 
-## Режимы
+## Protection
+
+После первого запуска в menu bar появляется shield icon. Protection можно
+включить из этого меню или кнопкой `Enable Protection` в Diagnostics:
+
+1. Явно включить Protection и один раз выдать Accessibility.
+2. Убедиться, что статус стал `Protection: Active`.
+3. Закрыть Diagnostics window. Приложение и filter продолжат работать в menu bar.
+4. Для временного отключения выбрать `Pause Protection`.
+
+Protection сохраняет явный выбор пользователя и автоматически включается при
+следующем ручном запуске приложения. `Launch at Login` относится к следующему
+этапу и в v0.3 ещё не реализован.
+
+Production filter имеет один active `kCGHIDEventTap + headInsert + default` и
+удаляет только события без delta на всех трёх axes с
+`scrollPhase=changed` и без momentum phase. Begin/end/cancel, momentum и любое
+реальное перемещение всегда пропускаются. Callback ведёт только лёгкие счётчики
+в памяти; Protection не создаёт файлов и не делает network requests.
+
+## Diagnostics
+
+Diagnostics открывается через `Open Diagnostics...` в menu bar. Оно измеряет
+scroll-события в двух точках:
+
+- ingress: `kCGHIDEventTap + headInsert + default`, принимает решение pass/drop;
+- downstream: `kCGAnnotatedSessionEventTap + tailAppend + listenOnly`.
+
+Diagnostic modes:
 
 - `Monitor only`: пропускает все события и только измеряет их.
 - `Drop zero-delta changed events`: удаляет только события без любой delta с
@@ -18,9 +47,9 @@ ScrollProbe никогда не синтезирует события и не и
 - `Drop all`: удаляет все scroll events в течение 10 секунд после установки
   taps, затем автоматически продолжает в monitor-only режиме.
 
-Экспериментальные drop-режимы доступны только для guest-профилей. Выбранный и
-фактически активный mode записывается соответственно в `run-start` и каждую
-`metrics`-запись.
+Экспериментальные drop-режимы доступны только для guest profiles и только когда
+background Protection поставлен на паузу. Во время diagnostic run состояние
+Protection заморожено, чтобы tap ordering и смысл лога не менялись на ходу.
 
 ## Сборка
 
@@ -48,8 +77,10 @@ Identifier-only requirement подходит только для локальн�
 ## Разрешения
 
 1. Запустить `dist/ScrollProbe.app`.
-2. Нажать `Request Accessibility` и включить ScrollProbe в System Settings.
-3. Перезапустить приложение, если macOS не применил разрешение сразу.
+2. Нажать `Enable Protection` или `Request Accessibility` и включить ScrollProbe
+   в System Settings.
+3. Protection автоматически повторит запуск после выдачи права. Если macOS не
+   применил его сразу, перезапустить приложение.
 
 Отдельный Input Monitoring не требуется. Accessibility уже разрешает активный
 HID tap, а downstream listen-only tap подтвержденно работает с тем же доступом.
@@ -57,9 +88,9 @@ HID tap, а downstream listen-only tap подтвержденно работае
 таблицу Input Monitoring, даже когда tap успешно создан, поэтому отдельного
 permission flow в приложении нет.
 
-Работоспособность определяется не текстом permission label, а фактом, что после
-`Start` растет `ingress.totalObserved`. В monitor mode должен также расти
-`downstream.totalObserved`; в drop-all он намеренно остается неизменным.
+Работоспособность background filter определяется фактическим статусом
+`Protection: Active` и ростом menu-bar counters. Для Diagnostics после `Start`
+должен расти `ingress.totalObserved`; в monitor mode также растёт downstream.
 
 ## Перенос в guest
 
@@ -83,9 +114,10 @@ Xcode, Swift и остальные инструменты сборки в guest 
 xattr -dr com.apple.quarantine "$HOME/Applications/ScrollProbe.app"
 ```
 
-## Логи
+## Diagnostic Logs
 
-Каждый запуск создает JSONL. Каталог по умолчанию:
+Только явный запуск Diagnostics создаёт JSONL. Background Protection ничего не
+пишет. Каталог по умолчанию:
 
 ```text
 ~/Library/Logs/ScrollProbe/scrollprobe-<UTC>-<RUN_ID>.jsonl
@@ -98,16 +130,19 @@ xattr -dr com.apple.quarantine "$HOME/Applications/ScrollProbe.app"
 
 Типы записей:
 
-- `run-start`: версия app, ОС, host, PID, profile, mode и конфигурация taps;
+- `run-start`: версия app, ОС, host, PID, profile, physical input, UTM pointer,
+  mode, background Protection и конфигурация taps;
 - `tap-inventory`: зарегистрированные taps и процессы;
 - `metrics`: секундные агрегаты и фактически активный mode;
 - `mode-change`: автоматическое завершение временного drop-all;
+- `protection-state` и `protection-recovery`: изменения background tap во время
+  diagnostics;
 - `run-stop` или `error`.
 
 `CGGetEventTapList` сбрасывает min/max latency counters системных taps, поэтому
 inventory нужно делать только в заранее отмеченных точках эксперимента.
 
-## Первый baseline
+## Diagnostics Protocol
 
 Для каждого сценария используется отдельный run. Profile выбирается из списка,
 а UI показывает paired profile и порядок действий. Сценарии, направленные в
@@ -115,13 +150,14 @@ guest, записываются одновременно двумя экземп
 
 | Действие | Scenario на host | Scenario в guest |
 |---|---|---|
-| Нативное приложение host, trackpad | `host-native-trackpad` | - |
-| Horizon напрямую на host, trackpad | `host-horizon-trackpad` | - |
-| Нативное приложение guest, trackpad | `host-to-guest-native-trackpad` | `guest-native-trackpad` |
-| Ubuntu Horizon в guest, trackpad | `host-to-guest-horizon-ubuntu-trackpad` | `guest-horizon-ubuntu-trackpad` |
-| Windows Horizon в guest, trackpad | `host-to-guest-horizon-windows-trackpad` | `guest-horizon-windows-trackpad` |
-| Ubuntu Horizon в guest, mouse | `host-to-guest-horizon-ubuntu-mouse` | `guest-horizon-ubuntu-mouse` |
-| Windows Horizon в guest, mouse | `host-to-guest-horizon-windows-mouse` | `guest-horizon-windows-mouse` |
+| Нативное приложение host | `host-native` | - |
+| Horizon напрямую на host | `host-horizon` | - |
+| Нативное приложение guest | `host-to-guest-native` | `guest-native` |
+| Ubuntu Horizon в guest | `host-to-guest-horizon-ubuntu` | `guest-horizon-ubuntu` |
+| Windows Horizon в guest | `host-to-guest-horizon-windows` | `guest-horizon-windows` |
+
+`Physical input` (`Trackpad`/`Mouse`) и UTM pointer (`Mac Trackpad`/`Generic
+Mouse`) выбираются независимо и записываются отдельными metadata fields.
 
 Порядок одного прогона:
 
@@ -139,9 +175,8 @@ control используется один дискретный шаг колес
 не попадает в эти логи, но случайная или продолжительная прокрутка непригодна
 для численного сравнения сценариев.
 
-Для первого raw baseline в guest нужно завершить LinearMouse. Отдельные прогоны
-с LinearMouse выполняются позднее с дополнительным суффиксом scenario, например
-`guest-horizon-ubuntu-trackpad-linearmouse`.
+Для raw baseline в guest нужно завершить LinearMouse. Его состояние при
+необходимости фиксируется отдельно в наблюдениях эксперимента.
 
 Один и тот же собранный bundle следует использовать на host и guest, чтобы
 сравнивать одинаковый код. До завершения baseline его не следует пересобирать.
@@ -155,6 +190,6 @@ control используется один дискретный шаг колес
   momentum.
 - Совпадение host и guest event count не исключает патологию в phase/delta
   semantics.
-- Два парных monitor baseline уже подтвердили amplification. Следующий
-  эксперимент выполняется с targeted zero-delta filter, а drop-all остается
-  отдельной проверкой того, что Horizon не обходит ingress tap.
+- Парные runs подтвердили amplification до десятков тысяч zero-delta events.
+  Targeted filter снизил downstream до обычных десятков events/s и устранил
+  freeze в Ubuntu и Windows при обоих UTM pointer devices.

@@ -68,6 +68,12 @@ final class EventTapHandle {
         runLoopSource = source
         CFRunLoopAddSource(runLoop, source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        guard CGEvent.tapIsEnabled(tap: tap) else {
+            context.tap = nil
+            CFRunLoopRemoveSource(runLoop, source, .commonModes)
+            CFMachPortInvalidate(tap)
+            throw EventTapHandleError.creationFailed(name)
+        }
 
         let timer = Timer(timeInterval: 5, repeats: true) { [weak context] _ in
             guard let context, let tap = context.tap else {
@@ -80,6 +86,9 @@ final class EventTapHandle {
             if !CGEvent.tapIsEnabled(tap: tap), !context.wasDisabledByUserInput {
                 context.disabledHandler(.healthCheck)
                 CGEvent.tapEnable(tap: tap, enable: true)
+                if !CGEvent.tapIsEnabled(tap: tap) {
+                    context.faultHandler("Event tap could not be re-enabled by its health check.")
+                }
             }
         }
         healthTimer = timer
@@ -114,6 +123,9 @@ final class EventTapHandle {
             context.disabledHandler(.timeout)
             if let tap = context.tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
+                if !CGEvent.tapIsEnabled(tap: tap) {
+                    context.faultHandler("Event tap could not be re-enabled after a timeout.")
+                }
             }
             return Unmanaged.passUnretained(event)
 

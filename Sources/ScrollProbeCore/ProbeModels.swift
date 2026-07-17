@@ -152,7 +152,10 @@ public struct ProbeRunMetadata: Codable, Equatable, Sendable {
     public let applicationVersion: String
     public let applicationBuild: String
     public let scenario: String
+    public let physicalInput: String
+    public let utmPointerDevice: String
     public let mode: ProbeMode
+    public let backgroundProtectionActive: Bool
     public let ingressDescription: String
     public let downstreamDescription: String
 }

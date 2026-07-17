@@ -25,5 +25,10 @@
 * Host и guest уже имеют одинаковую macOS 15.7.7.
 * Все сочетания UTM `Mac Trackpad`/`Generic Mouse` и Dynamic Resolution On/Off
   проверены без убедительного улучшения.
-* Количество scroll events пока не измерено. Нельзя выдавать гипотезу об их
-  умножении за подтвержденный факт.
+* Amplification на границе host -> guest измерен: один host stream превращается
+  в десятки тысяч guest events, почти полностью zero-delta
+  `scrollPhase=changed`.
+* Узкий guest filter, удаляющий только такие changed events без momentum,
+  устраняет freeze в Ubuntu и Windows при UTM `Mac Trackpad` и `Generic Mouse`.
+* Work Agent v0.3 реализует тот же filter как отдельный menu-bar Protection
+  service без JSONL и downstream tap; следующий обязательный этап - guest soak.

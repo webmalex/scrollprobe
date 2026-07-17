@@ -1,6 +1,6 @@
 # План исследования scroll freeze в VDI
 
-Последнее обновление: 2026-07-17
+Последнее обновление: 2026-07-18
 
 ## Назначение документа
 
@@ -77,6 +77,9 @@ metadata должны хранить эти измерения отдельны�
 14. Stress runs с десятками тысяч событий не вызвали freeze или disable/timeout
     ScrollProbe taps. Downstream peak после фильтра остался не выше примерно
     97 events/s.
+15. В v0.3 filter вынесен в отдельный menu-bar Protection service. Он использует
+    один active HID tap, не создает JSONL/downstream tap, сохраняет только явный
+    `protectionEnabled` и продолжает работать после закрытия Diagnostics window.
 
 ## Что пока не доказано
 
@@ -356,16 +359,16 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | Парные host/guest runs | Два run, amplification 155 -> 4750 и 162 -> 5269 |
 | Drop-all bypass mode | Реализован, не нужен для рабочего workaround |
 | Zero-delta changed filter | Подтверждённый workaround, Ubuntu/Windows без freeze |
-| Menu-bar protection agent | Следующий этап для ежедневной работы |
+| Menu-bar protection agent | Реализован локально в v0.3, нужен guest soak |
 | Throttling filter | Не требуется при текущем targeted workaround |
 | IOHID/DriverKit | Не требуется при работающем CGEventTap workaround |
 
 ## Следующий шаг
 
-Сделать в том же приложении production-like `Protection` service без обязательных
-логов и downstream tap. Service должен жить независимо от diagnostics window,
-управляться из menu bar, показывать реальное состояние tap и сохранять явный
-выбор пользователя. Текущую форму оставить optional diagnostics window.
+Установить собранный v0.3 bundle в guest как единственный запущенный экземпляр и
+провести working-day soak в Ubuntu и Windows Horizon. Проверить обычные, slow,
+reverse и horizontal gestures, физическую Bluetooth-мышь, закрытие/reopen
+Diagnostics, sleep/wake и отсутствие новых JSONL при работе только Protection.
 
 ## Smoke test ScrollProbe 2026-07-17
 
@@ -482,6 +485,26 @@ filter. Наблюдение нужно сохранить для soak test, н�
 инструкций; отдельный shared-state wizard имеет смысл только если ручных
 сценариев снова станет много.
 
+## Work Agent v0.3.0
+
+Phase 1 реализована в одном существующем bundle/TCC identity:
+
+1. `ProtectionService` владеет production HID tap независимо от окна и хранит
+   только in-memory counters.
+2. Status item показывает `Active`, `Paused`, `Accessibility Required` или
+   `Failed`; доступны Enable/Pause, permission request, Diagnostics и Quit.
+3. Явный выбор Protection сохраняется и восстанавливается при следующем ручном
+   запуске app. Автозапуск при login пока намеренно отсутствует.
+4. Diagnostics и Protection не могут менять active taps одновременно. Во время
+   diagnostic run protection controls заблокированы, а metadata фиксирует
+   `backgroundProtectionActive`.
+5. Physical input и UTM pointer стали независимыми metadata dimensions.
+6. Unit suite содержит 4 теста и проходит; release `0.3.0 (3)` собран, проверен
+   `codesign --verify` и упакован в `dist/ScrollProbe-macos-arm64.zip`.
+7. Host smoke подтвердил восстановление preference, background filter без JSONL
+   и сохранение процесса после закрытия окна. Полная lifecycle/soak проверка в
+   чистом single-instance guest окружении остается следующим шагом.
+
 ## Путь от probe к продукту
 
 Принято направление: не создавать второе приложение. Один app bundle и один
@@ -497,16 +520,9 @@ ScrollProbe v0.2.0 можно оставить запущенным в guest в 
 
 ### Phase 1. Work Agent
 
-1. Перенести ownership active filter tap из window controller в app coordinator.
-2. Добавить menu-bar status item: `Protected`, `Paused`, `Needs Accessibility`,
-   `Failed`.
-3. Добавить `Enable/Pause Protection`, `Open Diagnostics`, `Settings`, `Quit`.
-4. Protection path использует только active HID tap и минимальный classifier, не
-   создает JSONL и downstream tap.
-5. Закрытие diagnostics window не завершает приложение и не выключает protection.
-6. Сохранять только явный `protectionEnabled`; никогда не сохранять drop-all.
-7. При permission loss или неизвестной ошибке fail open и честно показывать
-   `Failed`, не блокируя scroll.
+Реализовано в v0.3.0: ownership active filter tap находится в app coordinator,
+status item показывает фактическое состояние, Protection не создаёт diagnostic
+resources, закрытие окна не завершает agent, а ошибки работают fail-open.
 
 ### Phase 2. Always-on reliability
 

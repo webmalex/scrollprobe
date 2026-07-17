@@ -1,8 +1,14 @@
 import AppKit
 import ScrollProbeCore
 
-final class MainWindowController: NSWindowController {
+final class MainWindowController: NSWindowController, NSWindowDelegate {
+    var onProtectionAction: (() -> Void)?
+    var onAccessibilityRequest: (() -> Void)?
+    var onDiagnosticsActivityChange: ((Bool) -> Void)?
+
     private let engine = ProbeEngine()
+    private let protectionLabel = NSTextField(labelWithString: "Protection: Paused")
+    private let protectionButton = NSButton()
     private let permissionLabel = NSTextField(labelWithString: "")
     private let stateLabel = NSTextField(labelWithString: "Stopped")
     private let logPathLabel = NSTextField(labelWithString: "No active log")
@@ -11,24 +17,33 @@ final class MainWindowController: NSWindowController {
     private let modeDescriptionLabel = NSTextField(wrappingLabelWithString: "")
     private let detailsTextView = NSTextView()
     private let scenarioPopup = NSPopUpButton()
+    private let physicalInputPopup = NSPopUpButton()
+    private let utmPointerPopup = NSPopUpButton()
     private let modePopup = NSPopUpButton()
     private let startButton = NSButton()
     private let stopButton = NSButton()
     private let chooseLogDirectoryButton = NSButton()
     private var selectedLogDirectory = MainWindowController.savedLogDirectory
+    private var protectionState: ProtectionState = .disabled
+    private var protectionDesired = false
+    private var protectionCounters = ProtectionCounters()
+    private var backgroundProtectionActive = false
+    private var runningDiagnosticMode: ProbeMode?
     private var permissionTimer: Timer?
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 940, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 940, height: 800),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "ScrollProbe \(Self.versionText)"
         window.center()
-        window.minSize = NSSize(width: 800, height: 700)
+        window.minSize = NSSize(width: 800, height: 740)
+        window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
 
         configureUI()
         configureEngineCallbacks()
@@ -52,6 +67,45 @@ final class MainWindowController: NSWindowController {
 
     func stopMonitoring() {
         engine.stop()
+    }
+
+    var isMonitoring: Bool {
+        engine.state == .starting || engine.state == .monitoring || engine.state == .stopping
+    }
+
+    func setProtectionStatus(
+        state: ProtectionState,
+        desired: Bool,
+        counters: ProtectionCounters
+    ) {
+        let stateChanged = protectionState != state
+        protectionState = state
+        protectionDesired = desired
+        protectionCounters = counters
+        backgroundProtectionActive = state == .protected
+        updateProtectionUI()
+        updateModeAvailability()
+        updateGuidance()
+        if stateChanged, isMonitoring {
+            engine.recordRuntimeEvent(
+                type: "protection-state",
+                message: Self.protectionStateDescription(state)
+            )
+        }
+    }
+
+    func windowWillClose(_: Notification) {
+        engine.stop()
+    }
+
+    func recordProtectionRecovery(_ counters: ProtectionCounters) {
+        guard isMonitoring else {
+            return
+        }
+        engine.recordRuntimeEvent(
+            type: "protection-recovery",
+            message: "timeout=\(counters.timeoutRecoveryCount) health=\(counters.healthRecoveryCount)"
+        )
     }
 
     private func configureUI() {
@@ -85,6 +139,21 @@ final class MainWindowController: NSWindowController {
         root.addArrangedSubview(explanation)
         explanation.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -40).isActive = true
 
+        let protectionRow = NSStackView()
+        protectionRow.orientation = .horizontal
+        protectionRow.alignment = .centerY
+        protectionRow.spacing = 8
+        protectionLabel.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
+        protectionLabel.lineBreakMode = .byTruncatingMiddle
+        protectionRow.addArrangedSubview(protectionLabel)
+        protectionButton.title = "Enable Protection"
+        protectionButton.target = self
+        protectionButton.action = #selector(protectionAction)
+        protectionButton.bezelStyle = .rounded
+        protectionRow.addArrangedSubview(protectionButton)
+        root.addArrangedSubview(protectionRow)
+        protectionLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 540).isActive = true
+
         permissionLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         root.addArrangedSubview(permissionLabel)
 
@@ -109,6 +178,34 @@ final class MainWindowController: NSWindowController {
         scenarioRow.addArrangedSubview(scenarioPopup)
         scenarioPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 500).isActive = true
         root.addArrangedSubview(scenarioRow)
+
+        let pointerRow = NSStackView()
+        pointerRow.orientation = .horizontal
+        pointerRow.alignment = .centerY
+        pointerRow.spacing = 8
+        pointerRow.addArrangedSubview(NSTextField(labelWithString: "Physical input:"))
+        physicalInputPopup.addItems(withTitles: PhysicalInputChoice.allCases.map(\.title))
+        let savedPhysicalInput = UserDefaults.standard.string(forKey: Self.physicalInputDefaultsKey)
+        let physicalInputIndex = PhysicalInputChoice.allCases.firstIndex {
+            $0.rawValue == savedPhysicalInput
+        } ?? 0
+        physicalInputPopup.selectItem(at: physicalInputIndex)
+        physicalInputPopup.target = self
+        physicalInputPopup.action = #selector(physicalInputChanged)
+        pointerRow.addArrangedSubview(physicalInputPopup)
+        physicalInputPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 160).isActive = true
+
+        pointerRow.addArrangedSubview(NSTextField(labelWithString: "UTM pointer:"))
+        utmPointerPopup.autoenablesItems = false
+        utmPointerPopup.addItems(withTitles: UTMPointerChoice.allCases.map(\.title))
+        let savedPointer = UserDefaults.standard.string(forKey: Self.utmPointerDefaultsKey)
+        let pointerIndex = UTMPointerChoice.allCases.firstIndex { $0.rawValue == savedPointer } ?? 1
+        utmPointerPopup.selectItem(at: pointerIndex)
+        utmPointerPopup.target = self
+        utmPointerPopup.action = #selector(utmPointerChanged)
+        pointerRow.addArrangedSubview(utmPointerPopup)
+        utmPointerPopup.widthAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
+        root.addArrangedSubview(pointerRow)
 
         let modeRow = NSStackView()
         modeRow.orientation = .horizontal
@@ -211,7 +308,9 @@ final class MainWindowController: NSWindowController {
         scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
 
         updateModeAvailability()
+        updateUTMPointerAvailability()
         updateGuidance()
+        updateProtectionUI()
     }
 
     private func configureEngineCallbacks() {
@@ -221,12 +320,20 @@ final class MainWindowController: NSWindowController {
             }
             self.stateLabel.stringValue = "\(state.rawValue): \(message)"
             self.updateButtons(for: state)
+            let isRunning = state == .starting || state == .monitoring || state == .stopping
+            self.onDiagnosticsActivityChange?(isRunning)
+            if state == .stopped || state == .failed {
+                self.runningDiagnosticMode = nil
+                self.updateGuidance()
+            }
             if let logURL = self.engine.logURL {
                 self.logPathLabel.stringValue = logURL.path
             }
         }
         engine.onSnapshot = { [weak self] snapshot in
+            self?.runningDiagnosticMode = snapshot.mode
             self?.detailsTextView.string = Self.format(snapshot)
+            self?.updateGuidance()
         }
     }
 
@@ -240,17 +347,38 @@ final class MainWindowController: NSWindowController {
         startButton.isEnabled = !isActive
         stopButton.isEnabled = state == .monitoring
         scenarioPopup.isEnabled = !isActive
+        physicalInputPopup.isEnabled = !isActive
+        utmPointerPopup.isEnabled = !isActive && selectedScenario.role != .standalone
         modePopup.isEnabled = !isActive
         chooseLogDirectoryButton.isEnabled = !isActive
+        updateProtectionUI()
     }
 
     @objc private func requestAccessibility() {
-        EventAccess.requestAccessibility()
+        if let onAccessibilityRequest {
+            onAccessibilityRequest()
+        } else {
+            EventAccess.requestAccessibility()
+        }
         refreshPermissionStatus()
+    }
+
+    @objc private func protectionAction() {
+        onProtectionAction?()
     }
 
     @objc private func startMonitoring() {
         let mode = selectedMode
+        if selectedScenario.role != .standalone, selectedUTMPointer == .notApplicable {
+            stateLabel.stringValue = "failed: Select Mac Trackpad or Generic Mouse for a guest profile."
+            return
+        }
+        if backgroundProtectionActive, mode != .monitor {
+            stateLabel.stringValue = "failed: Pause background protection before using a diagnostic drop mode."
+            modePopup.selectItem(at: ProbeMode.allCases.firstIndex(of: .monitor) ?? 0)
+            updateGuidance()
+            return
+        }
         if selectedScenario.role != .guest, mode != .monitor {
             stateLabel.stringValue = "failed: Drop modes are available only for guest profiles."
             modePopup.selectItem(at: ProbeMode.allCases.firstIndex(of: .monitor) ?? 0)
@@ -263,9 +391,14 @@ final class MainWindowController: NSWindowController {
         do {
             try engine.start(
                 scenario: selectedScenario.id,
+                physicalInput: selectedPhysicalInput.rawValue,
+                utmPointerDevice: selectedUTMPointer.rawValue,
                 mode: mode,
+                backgroundProtectionActive: backgroundProtectionActive,
                 logDirectory: selectedLogDirectory
             )
+            runningDiagnosticMode = mode
+            updateGuidance()
             if let logURL = engine.logURL {
                 logPathLabel.stringValue = logURL.path
             }
@@ -307,7 +440,21 @@ final class MainWindowController: NSWindowController {
 
     @objc private func scenarioChanged() {
         UserDefaults.standard.set(selectedScenario.id, forKey: Self.scenarioDefaultsKey)
+        updateUTMPointerAvailability()
         updateModeAvailability()
+        updateGuidance()
+    }
+
+    @objc private func utmPointerChanged() {
+        updateUTMPointerAvailability()
+        if selectedUTMPointer != .notApplicable {
+            UserDefaults.standard.set(selectedUTMPointer.rawValue, forKey: Self.utmPointerDefaultsKey)
+        }
+        updateGuidance()
+    }
+
+    @objc private func physicalInputChanged() {
+        UserDefaults.standard.set(selectedPhysicalInput.rawValue, forKey: Self.physicalInputDefaultsKey)
         updateGuidance()
     }
 
@@ -360,10 +507,32 @@ final class MainWindowController: NSWindowController {
         return ProbeMode.allCases[index]
     }
 
+    private var selectedUTMPointer: UTMPointerChoice {
+        let index = utmPointerPopup.indexOfSelectedItem
+        guard UTMPointerChoice.allCases.indices.contains(index) else {
+            return .notApplicable
+        }
+        return UTMPointerChoice.allCases[index]
+    }
+
+    private var selectedPhysicalInput: PhysicalInputChoice {
+        let index = physicalInputPopup.indexOfSelectedItem
+        guard PhysicalInputChoice.allCases.indices.contains(index) else {
+            return .trackpad
+        }
+        return PhysicalInputChoice.allCases[index]
+    }
+
     private func updateGuidance() {
         let scenario = selectedScenario
-        instructionLabel.stringValue = scenario.instructions
-        modeDescriptionLabel.stringValue = Self.modeDescription(selectedMode)
+        instructionLabel.stringValue = scenario.instructions(
+            physicalInput: selectedPhysicalInput.title,
+            utmPointer: selectedUTMPointer.title
+        )
+        let displayedMode = runningDiagnosticMode ?? selectedMode
+        modeDescriptionLabel.stringValue = backgroundProtectionActive
+            ? "Background protection is active. Diagnostics records the stream before and after the production filter."
+            : Self.modeDescription(displayedMode)
         modeDescriptionLabel.textColor = selectedMode == .monitor ? .secondaryLabelColor : .systemOrange
 
         switch scenario.role {
@@ -377,13 +546,62 @@ final class MainWindowController: NSWindowController {
     }
 
     private func updateModeAvailability() {
-        let guestModeAllowed = selectedScenario.role == .guest
+        let guestModeAllowed = selectedScenario.role == .guest && !backgroundProtectionActive
         for index in ProbeMode.allCases.indices where index > 0 {
             modePopup.item(at: index)?.isEnabled = guestModeAllowed
         }
-        if !guestModeAllowed, selectedMode != .monitor {
+        if !isMonitoring, !guestModeAllowed, selectedMode != .monitor {
             modePopup.selectItem(at: ProbeMode.allCases.firstIndex(of: .monitor) ?? 0)
         }
+    }
+
+    private func updateUTMPointerAvailability() {
+        let isGuestPath = selectedScenario.role != .standalone
+        utmPointerPopup.isEnabled = isGuestPath && !isMonitoring
+        utmPointerPopup.item(at: 0)?.isEnabled = !isGuestPath
+        utmPointerPopup.item(at: 1)?.isEnabled = isGuestPath
+        utmPointerPopup.item(at: 2)?.isEnabled = isGuestPath
+        if isGuestPath, selectedUTMPointer == .notApplicable {
+            let savedValue = UserDefaults.standard.string(forKey: Self.utmPointerDefaultsKey)
+            let savedChoice = UTMPointerChoice(rawValue: savedValue ?? "") ?? .macTrackpad
+            let choice = savedChoice == .notApplicable ? UTMPointerChoice.macTrackpad : savedChoice
+            utmPointerPopup.selectItem(at: UTMPointerChoice.allCases.firstIndex(of: choice) ?? 1)
+        } else if !isGuestPath {
+            utmPointerPopup.selectItem(at: UTMPointerChoice.allCases.firstIndex(of: .notApplicable) ?? 0)
+        }
+    }
+
+    private func updateProtectionUI() {
+        let stateText: String
+        let actionTitle: String
+        let actionEnabled: Bool
+
+        switch protectionState {
+        case .disabled:
+            stateText = "Protection: Paused"
+            actionTitle = "Enable Protection"
+            actionEnabled = true
+        case .starting:
+            stateText = "Protection: Starting..."
+            actionTitle = "Pause Protection"
+            actionEnabled = true
+        case .protected:
+            stateText = "Protection: Active | filtered=\(protectionCounters.dropped) passed=\(protectionCounters.passed)"
+            actionTitle = "Pause Protection"
+            actionEnabled = true
+        case .permissionMissing:
+            stateText = "Protection: Accessibility Required"
+            actionTitle = "Request Accessibility"
+            actionEnabled = true
+        case let .failed(message):
+            stateText = "Protection: Failed | \(message)"
+            actionTitle = "Retry Protection"
+            actionEnabled = protectionDesired
+        }
+
+        protectionLabel.stringValue = stateText
+        protectionButton.title = actionTitle
+        protectionButton.isEnabled = actionEnabled && !isMonitoring
     }
 
     private func confirmDropAll() -> Bool {
@@ -398,6 +616,8 @@ final class MainWindowController: NSWindowController {
     }
 
     private static let scenarioDefaultsKey = "selectedScenario"
+    private static let physicalInputDefaultsKey = "physicalInput"
+    private static let utmPointerDefaultsKey = "utmPointerDevice"
     private static let logDirectoryDefaultsKey = "logDirectory"
 
     private static var savedLogDirectory: URL {
@@ -432,6 +652,21 @@ final class MainWindowController: NSWindowController {
             return "Experimental guest filter: preserves gesture lifecycle, momentum, and every event with real delta."
         case .dropAll:
             return "Diagnostic guest mode: proves whether Horizon obeys the HID head tap, then automatically returns to monitor-only."
+        }
+    }
+
+    private static func protectionStateDescription(_ state: ProtectionState) -> String {
+        switch state {
+        case .disabled:
+            return "disabled"
+        case .starting:
+            return "starting"
+        case .protected:
+            return "protected"
+        case .permissionMissing:
+            return "permission-missing"
+        case let .failed(message):
+            return "failed: \(message)"
         }
     }
 
@@ -518,41 +753,67 @@ private enum ScenarioRole: Equatable {
     case guest
 }
 
+private enum PhysicalInputChoice: String, CaseIterable {
+    case trackpad
+    case mouse
+
+    var title: String {
+        switch self {
+        case .trackpad:
+            return "Trackpad"
+        case .mouse:
+            return "Mouse"
+        }
+    }
+}
+
+private enum UTMPointerChoice: String, CaseIterable {
+    case notApplicable = "not-applicable"
+    case macTrackpad = "mac-trackpad"
+    case genericMouse = "generic-mouse"
+
+    var title: String {
+        switch self {
+        case .notApplicable:
+            return "Not applicable (host only)"
+        case .macTrackpad:
+            return "Mac Trackpad"
+        case .genericMouse:
+            return "Generic Mouse"
+        }
+    }
+}
+
 private struct ScenarioPreset {
     let id: String
     let title: String
     let role: ScenarioRole
     let pairedID: String?
 
-    var instructions: String {
+    func instructions(physicalInput: String, utmPointer: String) -> String {
         switch role {
         case .standalone:
-            return "Start here, wait 2 seconds, perform one scroll gesture, wait for momentum plus 2 seconds, then Stop."
+            return "Physical input: \(physicalInput). Start here, wait 2 seconds, perform one scroll gesture, " +
+                "wait for momentum plus 2 seconds, then Stop."
         case .hostForGuest:
-            return "Step 1: start here. In guest select \(pairedID ?? "the paired profile") and start Step 2. " +
+            return "Physical input: \(physicalInput). UTM pointer: \(utmPointer). Step 1: start here. In guest select " +
+                "\(pairedID ?? "the paired profile") and start Step 2. " +
                 "Wait 2 seconds, perform one gesture, wait for momentum plus 2 seconds, stop guest, then host."
         case .guest:
-            return "Step 2: first start \(pairedID ?? "the paired profile") on host, then start here. " +
+            return "Physical input: \(physicalInput). UTM pointer: \(utmPointer). Step 2: first start " +
+                "\(pairedID ?? "the paired profile") on host, then start here. " +
                 "Wait 2 seconds, perform one gesture, wait for momentum plus 2 seconds, stop here, then host."
         }
     }
 
     static let all: [ScenarioPreset] = [
-        .init(id: "host-native-trackpad", title: "Host: native app, trackpad", role: .standalone, pairedID: nil),
-        .init(id: "host-horizon-trackpad", title: "Host: direct Horizon, trackpad", role: .standalone, pairedID: nil),
-        .init(id: "host-to-guest-native-trackpad", title: "Host side: guest native app, trackpad", role: .hostForGuest, pairedID: "guest-native-trackpad"),
-        .init(id: "guest-native-trackpad", title: "Guest: native app, trackpad", role: .guest, pairedID: "host-to-guest-native-trackpad"),
-        .init(id: "host-to-guest-horizon-ubuntu-trackpad", title: "Host side: guest Horizon Ubuntu, trackpad", role: .hostForGuest, pairedID: "guest-horizon-ubuntu-trackpad"),
-        .init(id: "guest-horizon-ubuntu-trackpad", title: "Guest: Horizon Ubuntu, trackpad", role: .guest, pairedID: "host-to-guest-horizon-ubuntu-trackpad"),
-        .init(id: "host-to-guest-horizon-windows-trackpad", title: "Host side: guest Horizon Windows, trackpad", role: .hostForGuest, pairedID: "guest-horizon-windows-trackpad"),
-        .init(id: "guest-horizon-windows-trackpad", title: "Guest: Horizon Windows, trackpad", role: .guest, pairedID: "host-to-guest-horizon-windows-trackpad"),
-        .init(id: "host-to-guest-horizon-ubuntu-mouse", title: "Host side: guest Horizon Ubuntu, mouse control", role: .hostForGuest, pairedID: "guest-horizon-ubuntu-mouse"),
-        .init(id: "guest-horizon-ubuntu-mouse", title: "Guest: Horizon Ubuntu, mouse control", role: .guest, pairedID: "host-to-guest-horizon-ubuntu-mouse"),
-        .init(id: "host-to-guest-horizon-windows-mouse", title: "Host side: guest Horizon Windows, mouse control", role: .hostForGuest, pairedID: "guest-horizon-windows-mouse"),
-        .init(id: "guest-horizon-windows-mouse", title: "Guest: Horizon Windows, mouse control", role: .guest, pairedID: "host-to-guest-horizon-windows-mouse"),
-        .init(id: "host-to-guest-horizon-ubuntu-trackpad-linearmouse", title: "Host side: guest Ubuntu, trackpad + LinearMouse", role: .hostForGuest, pairedID: "guest-horizon-ubuntu-trackpad-linearmouse"),
-        .init(id: "guest-horizon-ubuntu-trackpad-linearmouse", title: "Guest: Horizon Ubuntu, trackpad + LinearMouse", role: .guest, pairedID: "host-to-guest-horizon-ubuntu-trackpad-linearmouse"),
-        .init(id: "host-to-guest-horizon-windows-trackpad-linearmouse", title: "Host side: guest Windows, trackpad + LinearMouse", role: .hostForGuest, pairedID: "guest-horizon-windows-trackpad-linearmouse"),
-        .init(id: "guest-horizon-windows-trackpad-linearmouse", title: "Guest: Horizon Windows, trackpad + LinearMouse", role: .guest, pairedID: "host-to-guest-horizon-windows-trackpad-linearmouse"),
+        .init(id: "host-native", title: "Host: native app", role: .standalone, pairedID: nil),
+        .init(id: "host-horizon", title: "Host: direct Horizon", role: .standalone, pairedID: nil),
+        .init(id: "host-to-guest-native", title: "Host side: guest native app", role: .hostForGuest, pairedID: "guest-native"),
+        .init(id: "guest-native", title: "Guest: native app", role: .guest, pairedID: "host-to-guest-native"),
+        .init(id: "host-to-guest-horizon-ubuntu", title: "Host side: guest Horizon Ubuntu", role: .hostForGuest, pairedID: "guest-horizon-ubuntu"),
+        .init(id: "guest-horizon-ubuntu", title: "Guest: Horizon Ubuntu", role: .guest, pairedID: "host-to-guest-horizon-ubuntu"),
+        .init(id: "host-to-guest-horizon-windows", title: "Host side: guest Horizon Windows", role: .hostForGuest, pairedID: "guest-horizon-windows"),
+        .init(id: "guest-horizon-windows", title: "Guest: Horizon Windows", role: .guest, pairedID: "host-to-guest-horizon-windows"),
     ]
 }

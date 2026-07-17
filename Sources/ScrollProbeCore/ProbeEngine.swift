@@ -51,7 +51,10 @@ public final class ProbeEngine {
 
     public func start(
         scenario: String = "",
+        physicalInput: String = "unspecified",
+        utmPointerDevice: String = "unspecified",
         mode: ProbeMode = .monitor,
+        backgroundProtectionActive: Bool = false,
         logDirectory: URL = RunLogger.defaultLogDirectory
     ) throws {
         guard state == .stopped || state == .failed else {
@@ -81,7 +84,10 @@ public final class ProbeEngine {
             applicationVersion: Self.applicationVersion,
             applicationBuild: Self.applicationBuild,
             scenario: scenario.trimmingCharacters(in: .whitespacesAndNewlines),
+            physicalInput: physicalInput,
+            utmPointerDevice: utmPointerDevice,
             mode: mode,
+            backgroundProtectionActive: backgroundProtectionActive,
             ingressDescription: "kCGHIDEventTap/headInsert/default/\(mode.rawValue)",
             downstreamDescription: "kCGAnnotatedSessionEventTap/tailAppend/listenOnly"
         )
@@ -136,18 +142,29 @@ public final class ProbeEngine {
         }
         updateState(.stopping, message: "Stopping event taps...")
 
+        var tapCleanupError: Error?
         if let eventThread {
-            try? eventThread.performSync { [weak self] in
-                guard let self else {
-                    return
+            do {
+                try eventThread.performSync { [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    self.snapshotTimer?.invalidate()
+                    self.snapshotTimer = nil
+                    self.publishMetricsSnapshot()
+                    self.downstreamTap?.invalidate()
+                    self.downstreamTap = nil
+                    self.ingressTap?.invalidate()
+                    self.ingressTap = nil
                 }
-                self.snapshotTimer?.invalidate()
+            } catch {
+                tapCleanupError = error
+                snapshotTimer?.invalidate()
                 self.snapshotTimer = nil
-                self.publishMetricsSnapshot()
-                self.downstreamTap?.invalidate()
-                self.downstreamTap = nil
-                self.ingressTap?.invalidate()
-                self.ingressTap = nil
+                downstreamTap?.invalidate()
+                downstreamTap = nil
+                ingressTap?.invalidate()
+                ingressTap = nil
             }
             eventThread.stop()
         }
@@ -157,6 +174,10 @@ public final class ProbeEngine {
         }
         var resolvedState = finalState
         var resolvedMessage = message
+        if let tapCleanupError {
+            resolvedState = .failed
+            resolvedMessage = "Event tap teardown failed: \(tapCleanupError.localizedDescription)"
+        }
         do {
             try logger?.close()
         } catch {
@@ -182,6 +203,12 @@ public final class ProbeEngine {
     public func recordTapInventory(_ taps: [EventTapInfo], label: String) {
         if let runID {
             logger?.write(ProbeLogRecord(type: "tap-inventory", runID: runID, taps: taps, label: label))
+        }
+    }
+
+    public func recordRuntimeEvent(type: String, message: String) {
+        if let runID {
+            logger?.write(ProbeLogRecord(type: type, runID: runID, message: message))
         }
     }
 
@@ -280,13 +307,22 @@ public final class ProbeEngine {
 
     private func cleanupAfterFailedStart(message: String) {
         if let eventThread {
-            try? eventThread.performSync { [weak self] in
-                self?.snapshotTimer?.invalidate()
-                self?.snapshotTimer = nil
-                self?.downstreamTap?.invalidate()
-                self?.downstreamTap = nil
-                self?.ingressTap?.invalidate()
-                self?.ingressTap = nil
+            do {
+                try eventThread.performSync { [weak self] in
+                    self?.snapshotTimer?.invalidate()
+                    self?.snapshotTimer = nil
+                    self?.downstreamTap?.invalidate()
+                    self?.downstreamTap = nil
+                    self?.ingressTap?.invalidate()
+                    self?.ingressTap = nil
+                }
+            } catch {
+                snapshotTimer?.invalidate()
+                snapshotTimer = nil
+                downstreamTap?.invalidate()
+                downstreamTap = nil
+                ingressTap?.invalidate()
+                ingressTap = nil
             }
             eventThread.stop()
         }
