@@ -21,8 +21,10 @@ ScrollProbe никогда не синтезирует события и не и
 4. Для временного отключения выбрать `Pause Protection`.
 
 Protection сохраняет явный выбор пользователя и автоматически включается при
-следующем ручном запуске приложения. `Launch at Login` относится к следующему
-этапу и в v0.3 ещё не реализован.
+следующем запуске приложения. Checkbox `Launch at Login` в menu bar регистрирует
+основной app через `SMAppService.mainApp`; после входа пользователя agent
+запускается без Diagnostics window. Если macOS требует повторного согласия, menu
+показывает отдельный переход в System Settings > General > Login Items.
 
 Production filter имеет один active `kCGHIDEventTap + headInsert + default` и
 удаляет только события без delta на всех трёх axes с
@@ -67,10 +69,10 @@ make package
 Готовое приложение: `dist/ScrollProbe.app`. Команда `make package` создает
 переносимый архив `dist/ScrollProbe-macos-arm64.zip`.
 
-Проверенный v0.3.0 build 5 archive:
+Текущий v0.4.0 build 7 archive:
 
 ```text
-SHA-256  0ffb389f64c75632c35949dd1d8e63c806e811c76ffbf05dcd73b0922b63b33a
+SHA-256  290804f1cd11028e78a0071446a4a8c8b6b0e68532954d8bd4c44756192d1eda
 ```
 
 Сборка подписывается ad-hoc со стабильным локальным designated requirement по

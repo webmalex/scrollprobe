@@ -1,7 +1,8 @@
 import AppKit
 import ScrollProbeCore
+import ServiceManagement
 
-final class AppCoordinator: NSObject {
+final class AppCoordinator: NSObject, NSMenuDelegate {
     private static let protectionEnabledKey = "protectionEnabled"
 
     private let protectionService = ProtectionService()
@@ -9,14 +10,17 @@ final class AppCoordinator: NSObject {
     private var diagnosticsWindowController: MainWindowController?
     private var permissionTimer: Timer?
     private var counterMenuItem: NSMenuItem?
+    private var loginItemMenuItem: NSMenuItem?
+    private var loginItemApprovalMenuItem: NSMenuItem?
     private var counters = ProtectionCounters()
     private var diagnosticsRunning = false
+    private var loginItemStatus = SMAppService.mainApp.status
 
     private var protectionDesired: Bool {
         UserDefaults.standard.bool(forKey: Self.protectionEnabledKey)
     }
 
-    func start() {
+    func start(launchedAsLoginItem: Bool = false) {
         configureProtectionCallbacks()
         configureStatusButton()
         rebuildMenu()
@@ -30,7 +34,8 @@ final class AppCoordinator: NSObject {
             self?.refreshProtectionAccess()
         }
 
-        if isFirstLaunch || protectionService.state == .permissionMissing {
+        if !launchedAsLoginItem,
+           isFirstLaunch || protectionService.state == .permissionMissing {
             showDiagnostics()
         }
     }
@@ -125,6 +130,7 @@ final class AppCoordinator: NSObject {
     private func rebuildMenu() {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        menu.delegate = self
 
         let stateItem = NSMenuItem(title: Self.stateTitle(protectionService.state), action: nil, keyEquivalent: "")
         stateItem.isEnabled = false
@@ -159,6 +165,26 @@ final class AppCoordinator: NSObject {
             disableItem.isEnabled = !diagnosticsRunning
             menu.addItem(disableItem)
         }
+
+        menu.addItem(.separator())
+        let loginItem = NSMenuItem(
+            title: Self.loginItemTitle(loginItemStatus),
+            action: #selector(toggleLaunchAtLogin),
+            keyEquivalent: ""
+        )
+        loginItem.target = self
+        loginItemMenuItem = loginItem
+        menu.addItem(loginItem)
+
+        let approvalItem = NSMenuItem(
+            title: "Allow Launch at Login in System Settings...",
+            action: #selector(openLoginItemSettings),
+            keyEquivalent: ""
+        )
+        approvalItem.target = self
+        loginItemApprovalMenuItem = approvalItem
+        menu.addItem(approvalItem)
+        updateLoginItemMenuPresentation()
 
         menu.addItem(.separator())
         let diagnosticsItem = NSMenuItem(
@@ -256,6 +282,70 @@ final class AppCoordinator: NSObject {
         }
     }
 
+    func menuWillOpen(_: NSMenu) {
+        loginItemStatus = SMAppService.mainApp.status
+        updateLoginItemMenuPresentation()
+    }
+
+    private func setLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        let attemptedRegistration = service.status == .notRegistered || service.status == .notFound
+        var operationError: Error?
+        do {
+            switch service.status {
+            case .notRegistered:
+                try service.register()
+            case .enabled:
+                try service.unregister()
+            case .requiresApproval:
+                try service.unregister()
+            case .notFound:
+                try service.register()
+            @unknown default:
+                showLoginItemError("macOS returned an unknown login-item status.")
+            }
+        } catch {
+            operationError = error
+        }
+        loginItemStatus = service.status
+        updateLoginItemMenuPresentation()
+        if attemptedRegistration, loginItemStatus == .requiresApproval {
+            showLoginItemApprovalRequired()
+        } else if let operationError {
+            showLoginItemError(operationError.localizedDescription)
+        }
+    }
+
+    private func updateLoginItemMenuPresentation() {
+        loginItemMenuItem?.title = Self.loginItemTitle(loginItemStatus)
+        loginItemMenuItem?.state = Self.loginItemMenuState(loginItemStatus)
+        loginItemMenuItem?.isEnabled = true
+        loginItemApprovalMenuItem?.isHidden = loginItemStatus != .requiresApproval
+    }
+
+    private func showLoginItemApprovalRequired() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Allow ScrollProbe at Login"
+        alert.informativeText = "Enable ScrollProbe in System Settings > General > Login Items."
+        alert.addButton(withTitle: "Open Login Items")
+        alert.addButton(withTitle: "Cancel")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            SMAppService.openSystemSettingsLoginItems()
+        }
+    }
+
+    private func showLoginItemError(_ message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Could Not Change Launch at Login"
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
     private func updateDiagnosticsProtectionStatus() {
         diagnosticsWindowController?.setProtectionStatus(
             state: protectionService.state,
@@ -279,6 +369,14 @@ final class AppCoordinator: NSObject {
 
     @objc private func openDiagnostics() {
         showDiagnostics()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        setLaunchAtLogin()
+    }
+
+    @objc private func openLoginItemSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     @objc private func quit() {
@@ -315,5 +413,27 @@ final class AppCoordinator: NSObject {
 
     private static func counterTitle(_ counters: ProtectionCounters) -> String {
         "Filtered: \(counters.dropped)    Passed: \(counters.passed)"
+    }
+
+    private static func loginItemTitle(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .notRegistered, .enabled, .requiresApproval, .notFound:
+            return "Launch at Login"
+        @unknown default:
+            return "Launch at Login (Unknown)"
+        }
+    }
+
+    private static func loginItemMenuState(_ status: SMAppService.Status) -> NSControl.StateValue {
+        switch status {
+        case .enabled:
+            return .on
+        case .requiresApproval:
+            return .mixed
+        case .notRegistered, .notFound:
+            return .off
+        @unknown default:
+            return .off
+        }
     }
 }

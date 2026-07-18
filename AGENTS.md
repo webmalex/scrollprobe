@@ -33,3 +33,5 @@
 * Work Agent v0.3 реализует тот же filter как отдельный menu-bar Protection
   service без JSONL и downstream tap; пользователь подтвердил успешную работу в
   guest. Формальные long-soak и VM lifecycle tests остаются в Phase 2.
+* Opt-in `Launch at Login` через `SMAppService.mainApp` реализован в v0.4;
+  пользователь подтвердил автозапуск после старта ОС на host и в guest.

@@ -83,6 +83,9 @@ metadata должны хранить эти измерения отдельны�
 16. Пользователь проверил Work Agent в guest и сообщил, что всё работает отлично.
     Точная длительность и matrix этого acceptance run отдельно не записаны,
     поэтому формальный timed soak остаётся reliability-проверкой Phase 2.
+17. Opt-in `Launch at Login` реализован через `SMAppService.mainApp`. Пользователь
+    подтвердил реальный автозапуск после старта ОС на host и в guest. Login-item
+    launch не открывает Diagnostics window.
 
 ## Что пока не доказано
 
@@ -93,8 +96,8 @@ metadata должны хранить эти измерения отдельны�
    устраняет наблюдаемый freeze в тестовой топологии.
 3. Не снят численный stable control с физической Bluetooth-мышью при включенном
    filter.
-4. Не выполнены working-day soak, sleep/wake, VM suspend/resume, login item и
-   update/TCC migration tests.
+4. Не выполнены working-day soak, sleep/wake, VM suspend/resume и update/TCC
+   migration tests.
 5. Нет независимого подтверждения на других версиях macOS, UTM и Horizon.
 
 ## Уже исследованные upstream-факты
@@ -368,10 +371,9 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 
 ## Следующий шаг
 
-Phase 1 принята: guest-проверка успешна. Work Agent можно использовать ежедневно;
-при регрессии сохранить target, UTM pointer и counters. Следующий engineering
-этап - opt-in Launch at Login и формальные working-day/sleep/wake/VM lifecycle
-проверки из Phase 2.
+Phase 1 принята, Launch at Login из Phase 2 подтвержден на host и guest. Следующий
+engineering этап - формальные working-day, sleep/wake, lock/unlock и VM
+suspend/resume tests. При регрессии сохранить target, UTM pointer и counters.
 
 ## Smoke test ScrollProbe 2026-07-17
 
@@ -535,6 +537,19 @@ singleton через `open -n` и совпадение installed executable с p
 `dist/ScrollProbe-macos-arm64.zip` имеет SHA-256
 `0ffb389f64c75632c35949dd1d8e63c806e811c76ffbf05dcd73b0922b63b33a`.
 
+### Launch at Login v0.4.0
+
+1. Status menu содержит opt-in `Launch at Login`; регистрация и удаление
+   выполняются через `SMAppService.mainApp`.
+2. `.requiresApproval` показывает отдельный переход в System Settings, при этом
+   основную регистрацию можно удалить из app.
+3. `keyAELaunchedAsLogInItem` подавляет onboarding/Diagnostics при автоматическом
+   login launch; Protection восстанавливается из своего сохранённого preference.
+4. Пользователь подтвердил автозапуск после старта ОС на host и в guest на build
+   6. Build 7 содержит только последующий error/approval UX hardening.
+5. Локальный `tmp/dumpbtm.txt` сохранён для handoff, но не содержит явной строки
+   bundle ID ScrollProbe и не коммитится из-за inventory сторонних приложений.
+
 ## Путь от probe к продукту
 
 Принято направление: не создавать второе приложение. Один app bundle и один
@@ -556,7 +571,8 @@ resources, закрытие окна не завершает agent, а ошиб�
 
 ### Phase 2. Always-on reliability
 
-1. Добавить opt-in `Launch at Login` через `SMAppService.mainApp`.
+1. Opt-in `Launch at Login` через `SMAppService.mainApp` реализован и проверен на
+   host/guest.
 2. Проверить reboot/login, sleep/wake, lock/unlock, VM suspend/resume и TCC revoke.
 3. Реализовать bounded tap recreate/re-enable и working-day soak.
 4. Diagnostics errors не должны останавливать production protection service.

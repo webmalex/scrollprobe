@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let coordinator = AppCoordinator()
         self.coordinator = coordinator
-        coordinator.start()
+        coordinator.start(launchedAsLoginItem: Self.launchedAsLoginItem)
     }
 
     func applicationWillTerminate(_: Notification) {
@@ -40,6 +40,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static var existingApplication: NSRunningApplication? {
         runningApplications.first
+    }
+
+    private static var launchedAsLoginItem: Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent else {
+            return false
+        }
+        return event.eventID == kAEOpenApplication &&
+            event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
     }
 
     private static var existingLegacyApplication: NSRunningApplication? {
