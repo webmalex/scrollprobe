@@ -177,9 +177,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         let savedScenario = Self.currentScenarioID(for: legacyScenario)
         let selectedIndex = ScenarioPreset.all.firstIndex { $0.id == savedScenario } ?? 0
         scenarioPopup.selectItem(at: selectedIndex)
-        if savedScenario != legacyScenario {
-            UserDefaults.standard.set(savedScenario, forKey: Self.scenarioDefaultsKey)
-        }
         scenarioPopup.target = self
         scenarioPopup.action = #selector(scenarioChanged)
         scenarioRow.addArrangedSubview(scenarioPopup)
@@ -211,6 +208,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         utmPointerPopup.selectItem(at: pointerIndex)
         if storedPointer == nil, let savedPointer {
             UserDefaults.standard.set(savedPointer, forKey: Self.utmPointerDefaultsKey)
+        }
+        if savedScenario != legacyScenario {
+            UserDefaults.standard.set(savedScenario, forKey: Self.scenarioDefaultsKey)
         }
         utmPointerPopup.target = self
         utmPointerPopup.action = #selector(utmPointerChanged)
@@ -417,6 +417,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
                 backgroundProtectionActive: backgroundProtectionActive,
                 logDirectory: selectedLogDirectory
             )
+            guard engine.state == .monitoring else {
+                return
+            }
             runningDiagnosticMode = mode
             updateGuidance()
             if let logURL = engine.logURL {

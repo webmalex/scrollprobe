@@ -80,6 +80,9 @@ metadata должны хранить эти измерения отдельны�
 15. В v0.3 filter вынесен в отдельный menu-bar Protection service. Он использует
     один active HID tap, не создает JSONL/downstream tap, сохраняет только явный
     `protectionEnabled` и продолжает работать после закрытия Diagnostics window.
+16. Пользователь проверил Work Agent в guest и сообщил, что всё работает отлично.
+    Точная длительность и matrix этого acceptance run отдельно не записаны,
+    поэтому формальный timed soak остаётся reliability-проверкой Phase 2.
 
 ## Что пока не доказано
 
@@ -359,16 +362,16 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | Парные host/guest runs | Два run, amplification 155 -> 4750 и 162 -> 5269 |
 | Drop-all bypass mode | Реализован, не нужен для рабочего workaround |
 | Zero-delta changed filter | Подтверждённый workaround, Ubuntu/Windows без freeze |
-| Menu-bar protection agent | Реализован локально в v0.3, нужен guest soak |
+| Menu-bar protection agent | Реализован в v0.3, guest acceptance успешен |
 | Throttling filter | Не требуется при текущем targeted workaround |
 | IOHID/DriverKit | Не требуется при работающем CGEventTap workaround |
 
 ## Следующий шаг
 
-Установить собранный v0.3 bundle в guest как единственный запущенный экземпляр и
-провести working-day soak в Ubuntu и Windows Horizon. Проверить обычные, slow,
-reverse и horizontal gestures, физическую Bluetooth-мышь, закрытие/reopen
-Diagnostics, sleep/wake и отсутствие новых JSONL при работе только Protection.
+Phase 1 принята: guest-проверка успешна. Work Agent можно использовать ежедневно;
+при регрессии сохранить target, UTM pointer и counters. Следующий engineering
+этап - opt-in Launch at Login и формальные working-day/sleep/wake/VM lifecycle
+проверки из Phase 2.
 
 ## Smoke test ScrollProbe 2026-07-17
 
@@ -499,7 +502,7 @@ Phase 1 реализована в одном существующем bundle/TCC
    diagnostic run protection controls заблокированы, а metadata фиксирует
    `backgroundProtectionActive`.
 5. Physical input и UTM pointer стали независимыми metadata dimensions.
-6. Unit suite содержит 5 тестов и проходит; release `0.3.0 (4)` собран, проверен
+6. Unit suite содержит 5 тестов и проходит; release `0.3.0 (5)` собран, проверен
    `codesign --verify` и упакован в `dist/ScrollProbe-macos-arm64.zip`.
 7. Host smoke подтвердил восстановление preference, background filter без JSONL
    и сохранение процесса после закрытия окна. Полная lifecycle/soak проверка в
@@ -521,8 +524,16 @@ Phase 1 реализована в одном существующем bundle/TCC
    двум копиям с одинаковым bundle ID одновременно установить taps.
 6. Только явный diagnostic smoke создал новый JSONL с корректным `run-stop`.
    Protection-only launches/restarts новых логов не создали.
-7. Текущий архив `dist/ScrollProbe-macos-arm64.zip` имеет SHA-256
-   `6cbc187b6cbc058d9f2513ecb485ed4cbe3936c6fc4bc420eb1957b7b02cfefa`.
+7. Этот полный lifecycle/interlock smoke выполнялся на pre-release build 4.
+
+### Final local artifact v0.3.0 (5)
+
+После последних reentrancy hardening changes build number поднят отдельно, чтобы
+логи не смешивали разные binaries под build 4. Для установленного build 5 повторно
+проверены подпись, восстановление `Active` без окна, reopen/close Diagnostics,
+singleton через `open -n` и совпадение installed executable с package. Архив
+`dist/ScrollProbe-macos-arm64.zip` имеет SHA-256
+`0ffb389f64c75632c35949dd1d8e63c806e811c76ffbf05dcd73b0922b63b33a`.
 
 ## Путь от probe к продукту
 
@@ -558,8 +569,9 @@ resources, закрытие окна не завершает agent, а ошиб�
 1. Выбрать окончательные product name и bundle ID до внешней раздачи.
 2. Подписывать Developer ID с hardened runtime, timestamp, notarization и staple.
 3. Добавить MIT license, privacy statement, uninstall и Accessibility onboarding.
-4. Protection mode ничего не пишет на диск и не использует сеть. Diagnostics
-   opt-in, bounded и экспортируется с удалением hostname, user paths и inventory
+4. Protection mode не пишет input data/diagnostic logs и не использует сеть.
+   Допустимы только boolean preference и пустой process lock. Diagnostics opt-in,
+   bounded и экспортируется с удалением hostname, user paths и inventory
    посторонних security/VPN приложений.
 5. Проверить физическую mouse, horizontal scroll, momentum, slow/reverse gestures
    и обновление beta поверх предыдущей версии с сохранением TCC/login state.

@@ -28,9 +28,10 @@ Production filter имеет один active `kCGHIDEventTap + headInsert + defa
 удаляет только события без delta на всех трёх axes с
 `scrollPhase=changed` и без momentum phase. Begin/end/cancel, momentum и любое
 реальное перемещение всегда пропускаются. Callback ведёт только лёгкие счётчики
-в памяти; Protection не создаёт логов и не делает network requests. Приложение
-создаёт только пустой lock file в `~/Library/Caches/dev.scrollprobe.ScrollProbe`,
-чтобы второй экземпляр не мог установить конкурирующий tap.
+в памяти; Protection не записывает input data или diagnostic logs и не делает
+network requests. Приложение сохраняет boolean preference в `UserDefaults` и
+создаёт пустой lock file в `~/Library/Caches/dev.scrollprobe.ScrollProbe`, чтобы
+второй экземпляр не мог установить конкурирующий tap.
 
 ## Diagnostics
 
@@ -66,10 +67,10 @@ make package
 Готовое приложение: `dist/ScrollProbe.app`. Команда `make package` создает
 переносимый архив `dist/ScrollProbe-macos-arm64.zip`.
 
-Проверенный v0.3.0 build 4 archive:
+Проверенный v0.3.0 build 5 archive:
 
 ```text
-SHA-256  6cbc187b6cbc058d9f2513ecb485ed4cbe3936c6fc4bc420eb1957b7b02cfefa
+SHA-256  0ffb389f64c75632c35949dd1d8e63c806e811c76ffbf05dcd73b0922b63b33a
 ```
 
 Сборка подписывается ad-hoc со стабильным локальным designated requirement по

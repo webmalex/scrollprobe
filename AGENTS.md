@@ -31,4 +31,5 @@
 * Узкий guest filter, удаляющий только такие changed events без momentum,
   устраняет freeze в Ubuntu и Windows при UTM `Mac Trackpad` и `Generic Mouse`.
 * Work Agent v0.3 реализует тот же filter как отдельный menu-bar Protection
-  service без JSONL и downstream tap; следующий обязательный этап - guest soak.
+  service без JSONL и downstream tap; пользователь подтвердил успешную работу в
+  guest. Формальные long-soak и VM lifecycle tests остаются в Phase 2.

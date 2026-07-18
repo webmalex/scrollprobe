@@ -72,7 +72,6 @@ public final class ProbeEngine {
                 self?.handleFatalTapFault("Log writer fault: \(error.localizedDescription)")
             }
         )
-        updateState(.starting, message: "Creating event taps...")
         let startedAt = Date()
         let metadata = ProbeRunMetadata(
             runID: runID,
@@ -104,6 +103,10 @@ public final class ProbeEngine {
         activeMode = mode
         dropAllDeadlineUptimeNanos = nil
         eventThread.start()
+        updateState(.starting, message: "Creating event taps...")
+        guard state == .starting, self.eventThread === eventThread else {
+            return
+        }
 
         do {
             try eventThread.performSync { [weak self] in
@@ -118,6 +121,9 @@ public final class ProbeEngine {
         }
 
         updateState(.monitoring, message: Self.statusMessage(for: mode))
+        guard state == .monitoring, self.eventThread === eventThread else {
+            return
+        }
         DispatchQueue.global(qos: .utility).async { [logger] in
             do {
                 let taps = try TapInventory.snapshot()

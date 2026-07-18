@@ -84,12 +84,15 @@ public final class ProtectionService {
             return false
         }
 
-        updateState(.starting)
         resetCounters()
 
         let eventThread = EventTapThread()
         self.eventThread = eventThread
         eventThread.start()
+        updateState(.starting)
+        guard state == .starting, self.eventThread === eventThread else {
+            return false
+        }
 
         do {
             try eventThread.performSync { [weak self] in
