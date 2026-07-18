@@ -113,7 +113,7 @@ public final class ProtectionService {
             return
         }
         let didCleanUp = cleanupTapThread()
-        updateState(didCleanUp ? .disabled : .failed("Protection tap teardown timed out."))
+        updateState(didCleanUp ? .disabled : .failed("Protection tap teardown could not be confirmed."))
     }
 
     private func installTapAndTimer() throws {
@@ -135,7 +135,9 @@ public final class ProtectionService {
         )
 
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            self?.publishCounters()
+            autoreleasepool {
+                self?.publishCounters()
+            }
         }
         countersTimer = timer
         RunLoop.current.add(timer, forMode: .common)
@@ -227,8 +229,13 @@ public final class ProtectionService {
 
     private func updateState(_ state: ProtectionState) {
         self.state = state
-        DispatchQueue.main.async { [weak self] in
+        let publish: () -> Void = { [weak self] in
             self?.onStateChange?(state)
+        }
+        if Thread.isMainThread {
+            publish()
+        } else {
+            DispatchQueue.main.async(execute: publish)
         }
     }
 }

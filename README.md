@@ -28,7 +28,9 @@ Production filter имеет один active `kCGHIDEventTap + headInsert + defa
 удаляет только события без delta на всех трёх axes с
 `scrollPhase=changed` и без momentum phase. Begin/end/cancel, momentum и любое
 реальное перемещение всегда пропускаются. Callback ведёт только лёгкие счётчики
-в памяти; Protection не создаёт файлов и не делает network requests.
+в памяти; Protection не создаёт логов и не делает network requests. Приложение
+создаёт только пустой lock file в `~/Library/Caches/dev.scrollprobe.ScrollProbe`,
+чтобы второй экземпляр не мог установить конкурирующий tap.
 
 ## Diagnostics
 
@@ -63,6 +65,12 @@ make package
 
 Готовое приложение: `dist/ScrollProbe.app`. Команда `make package` создает
 переносимый архив `dist/ScrollProbe-macos-arm64.zip`.
+
+Проверенный v0.3.0 build 4 archive:
+
+```text
+SHA-256  6cbc187b6cbc058d9f2513ecb485ed4cbe3936c6fc4bc420eb1957b7b02cfefa
+```
 
 Сборка подписывается ad-hoc со стабильным локальным designated requirement по
 bundle ID. Обычная ad-hoc подпись привязана к `cdhash`, из-за чего macOS считает
@@ -106,6 +114,10 @@ TCC-базы host и guest независимы, поэтому право вы�
 Xcode, Swift и остальные инструменты сборки в guest не требуются. ZIP от
 `make package` является только запасным способом переноса для файловых систем,
 которые повреждают структуру bundle или executable attributes.
+
+Перед заменой уже установленного bundle нужно выбрать `Quit ScrollProbe` в menu
+bar. Новый экземпляр намеренно завершится, пока старый процесс с тем же bundle ID
+ещё работает.
 
 Если macOS сохранила quarantine attribute и продолжает блокировать локальный
 диагностический bundle, удалить его уже после копирования в `~/Applications`:

@@ -254,7 +254,9 @@ public final class ProbeEngine {
         )
 
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            self?.publishMetricsSnapshot()
+            autoreleasepool {
+                self?.publishMetricsSnapshot()
+            }
         }
         snapshotTimer = timer
         RunLoop.current.add(timer, forMode: .common)
@@ -361,15 +363,17 @@ public final class ProbeEngine {
 
     private func updateState(_ state: ProbeEngineState, message: String) {
         self.state = state
-        publishStatus(message)
+        publishStatus(state, message: message)
     }
 
-    private func publishStatus(_ message: String) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else {
-                return
-            }
-            self.onStatus?(self.state, message)
+    private func publishStatus(_ state: ProbeEngineState, message: String) {
+        let publish: () -> Void = { [weak self] in
+            self?.onStatus?(state, message)
+        }
+        if Thread.isMainThread {
+            publish()
+        } else {
+            DispatchQueue.main.async(execute: publish)
         }
     }
 

@@ -499,11 +499,30 @@ Phase 1 реализована в одном существующем bundle/TCC
    diagnostic run protection controls заблокированы, а metadata фиксирует
    `backgroundProtectionActive`.
 5. Physical input и UTM pointer стали независимыми metadata dimensions.
-6. Unit suite содержит 4 теста и проходит; release `0.3.0 (3)` собран, проверен
+6. Unit suite содержит 5 тестов и проходит; release `0.3.0 (4)` собран, проверен
    `codesign --verify` и упакован в `dist/ScrollProbe-macos-arm64.zip`.
 7. Host smoke подтвердил восстановление preference, background filter без JSONL
    и сохранение процесса после закрытия окна. Полная lifecycle/soak проверка в
    чистом single-instance guest окружении остается следующим шагом.
+
+### Host lifecycle smoke v0.3.0 (4), 2026-07-18
+
+1. Финальный bundle установлен в `/Applications`; identifier-only designated
+   requirement и существующее Accessibility permission сохранились.
+2. Protection восстановился в `Active` без открытого окна. Synthetic zero-delta
+   changed event увеличил `Filtered` с 0 до 1.
+3. Закрытие Diagnostics оставило agent запущенным. Pause и Active независимо
+   пережили штатный Quit/relaunch через сохранённый `protectionEnabled`.
+4. Monitor-only Diagnostics при активном Protection записал
+   `backgroundProtectionActive=true`, build 4 и отдельные physical/UTM fields.
+   На время run и window button, и menu action изменения Protection были реально
+   disabled; после Stop снова включились.
+5. Принудительный `open -n` оставил один PID. Межпроцессный `flock` не позволяет
+   двум копиям с одинаковым bundle ID одновременно установить taps.
+6. Только явный diagnostic smoke создал новый JSONL с корректным `run-stop`.
+   Protection-only launches/restarts новых логов не создали.
+7. Текущий архив `dist/ScrollProbe-macos-arm64.zip` имеет SHA-256
+   `6cbc187b6cbc058d9f2513ecb485ed4cbe3936c6fc4bc420eb1957b7b02cfefa`.
 
 ## Путь от probe к продукту
 
@@ -530,6 +549,9 @@ resources, закрытие окна не завершает agent, а ошиб�
 2. Проверить reboot/login, sleep/wake, lock/unlock, VM suspend/resume и TCC revoke.
 3. Реализовать bounded tap recreate/re-enable и working-day soak.
 4. Diagnostics errors не должны останавливать production protection service.
+5. Перевести lifecycle event-tap thread на nonblocking generation ownership;
+   timeout не должен освобождать callback context, пока worker ещё может его
+   использовать.
 
 ### Phase 3. Private beta
 

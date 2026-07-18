@@ -33,6 +33,10 @@ final class ProbeModeTests: XCTestCase {
         XCTAssertEqual(ZeroDeltaChangedPolicy.decision(for: verticalPointDelta), .pass)
         XCTAssertEqual(ZeroDeltaChangedPolicy.decision(for: horizontalFixedDelta), .pass)
         XCTAssertEqual(ZeroDeltaChangedPolicy.decision(for: thirdAxisPointDelta), .pass)
+        XCTAssertEqual(
+            ProbeMode.dropZeroDeltaChanged.decision(for: ScrollSample(event: thirdAxisPointDelta)),
+            .pass
+        )
         XCTAssertEqual(ZeroDeltaChangedPolicy.decision(for: verticalIntegerDelta), .pass)
         XCTAssertEqual(ZeroDeltaChangedPolicy.decision(for: momentum), .pass)
         XCTAssertEqual(ZeroDeltaChangedPolicy.decision(for: began), .pass)

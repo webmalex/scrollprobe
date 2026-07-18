@@ -76,18 +76,20 @@ final class EventTapHandle {
         }
 
         let timer = Timer(timeInterval: 5, repeats: true) { [weak context] _ in
-            guard let context, let tap = context.tap else {
-                return
-            }
-            guard CFMachPortIsValid(tap) else {
-                context.faultHandler("Event tap became invalid.")
-                return
-            }
-            if !CGEvent.tapIsEnabled(tap: tap), !context.wasDisabledByUserInput {
-                context.disabledHandler(.healthCheck)
-                CGEvent.tapEnable(tap: tap, enable: true)
-                if !CGEvent.tapIsEnabled(tap: tap) {
-                    context.faultHandler("Event tap could not be re-enabled by its health check.")
+            autoreleasepool {
+                guard let context, let tap = context.tap else {
+                    return
+                }
+                guard CFMachPortIsValid(tap) else {
+                    context.faultHandler("Event tap became invalid.")
+                    return
+                }
+                if !CGEvent.tapIsEnabled(tap: tap), !context.wasDisabledByUserInput {
+                    context.disabledHandler(.healthCheck)
+                    CGEvent.tapEnable(tap: tap, enable: true)
+                    if !CGEvent.tapIsEnabled(tap: tap) {
+                        context.faultHandler("Event tap could not be re-enabled by its health check.")
+                    }
                 }
             }
         }
@@ -113,38 +115,40 @@ final class EventTapHandle {
     }
 
     private static let callback: CGEventTapCallBack = { _, type, event, userInfo in
-        guard let userInfo else {
-            return Unmanaged.passUnretained(event)
-        }
-        let context = Unmanaged<CallbackContext>.fromOpaque(userInfo).takeUnretainedValue()
-
-        switch type {
-        case .tapDisabledByTimeout:
-            context.disabledHandler(.timeout)
-            if let tap = context.tap {
-                CGEvent.tapEnable(tap: tap, enable: true)
-                if !CGEvent.tapIsEnabled(tap: tap) {
-                    context.faultHandler("Event tap could not be re-enabled after a timeout.")
-                }
-            }
-            return Unmanaged.passUnretained(event)
-
-        case .tapDisabledByUserInput:
-            context.wasDisabledByUserInput = true
-            context.disabledHandler(.userInput)
-            context.faultHandler("Event tap was disabled by user input.")
-            return Unmanaged.passUnretained(event)
-
-        case .scrollWheel:
-            switch context.eventHandler(event) {
-            case .pass:
+        autoreleasepool {
+            guard let userInfo else {
                 return Unmanaged.passUnretained(event)
-            case .drop:
-                return nil
             }
+            let context = Unmanaged<CallbackContext>.fromOpaque(userInfo).takeUnretainedValue()
 
-        default:
-            return Unmanaged.passUnretained(event)
+            switch type {
+            case .tapDisabledByTimeout:
+                context.disabledHandler(.timeout)
+                if let tap = context.tap {
+                    CGEvent.tapEnable(tap: tap, enable: true)
+                    if !CGEvent.tapIsEnabled(tap: tap) {
+                        context.faultHandler("Event tap could not be re-enabled after a timeout.")
+                    }
+                }
+                return Unmanaged.passUnretained(event)
+
+            case .tapDisabledByUserInput:
+                context.wasDisabledByUserInput = true
+                context.disabledHandler(.userInput)
+                context.faultHandler("Event tap was disabled by user input.")
+                return Unmanaged.passUnretained(event)
+
+            case .scrollWheel:
+                switch context.eventHandler(event) {
+                case .pass:
+                    return Unmanaged.passUnretained(event)
+                case .drop:
+                    return nil
+                }
+
+            default:
+                return Unmanaged.passUnretained(event)
+            }
         }
     }
 }

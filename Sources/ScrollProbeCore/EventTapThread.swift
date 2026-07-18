@@ -1,6 +1,6 @@
 import Foundation
 
-public enum EventTapThreadError: LocalizedError {
+public enum EventTapThreadError: LocalizedError, Equatable {
     case notRunning
 
     public var errorDescription: String? {
@@ -19,6 +19,7 @@ public final class EventTapThread {
     private var runLoop: CFRunLoop?
     private var didStart = false
     private var didStop = false
+    private var stopRequested = false
 
     public init() {}
 
@@ -47,23 +48,23 @@ public final class EventTapThread {
 
     public func performSync<T>(_ block: @escaping () throws -> T) throws -> T {
         stateLock.lock()
-        let worker = worker
-        let runLoop = runLoop
-        stateLock.unlock()
-
-        guard let worker, let runLoop else {
+        guard !didStop, let worker, let runLoop else {
+            stateLock.unlock()
             throw EventTapThreadError.notRunning
         }
         if Thread.current === worker {
+            stateLock.unlock()
             return try block()
         }
 
         let resultBox = ThreadResultBox<T>()
         let completed = DispatchSemaphore(value: 0)
+        // Queue while holding the lifecycle lock so stop cannot overtake this block.
         CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) {
             resultBox.result = Result { try block() }
             completed.signal()
         }
+        stateLock.unlock()
         CFRunLoopWakeUp(runLoop)
         completed.wait()
 
@@ -80,23 +81,28 @@ public final class EventTapThread {
             return
         }
         didStop = true
+        stopRequested = true
         let worker = worker
         let runLoop = runLoop
         stateLock.unlock()
 
-        guard let runLoop else {
+        guard let worker else {
             return
         }
 
         if Thread.current === worker {
-            CFRunLoopStop(runLoop)
+            if let runLoop {
+                CFRunLoopStop(runLoop)
+            }
             return
         }
 
-        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) {
-            CFRunLoopStop(runLoop)
+        if let runLoop {
+            CFRunLoopPerformBlock(runLoop, CFRunLoopMode.commonModes.rawValue) {
+                CFRunLoopStop(runLoop)
+            }
+            CFRunLoopWakeUp(runLoop)
         }
-        CFRunLoopWakeUp(runLoop)
         finished.wait()
     }
 
@@ -108,10 +114,13 @@ public final class EventTapThread {
 
             stateLock.lock()
             runLoop = currentRunLoop
+            let shouldStop = stopRequested
             stateLock.unlock()
             ready.signal()
 
-            CFRunLoopRun()
+            if !shouldStop {
+                CFRunLoopRun()
+            }
 
             stateLock.lock()
             runLoop = nil

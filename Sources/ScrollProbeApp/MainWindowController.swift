@@ -48,11 +48,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         configureUI()
         configureEngineCallbacks()
         refreshPermissionStatus()
-
-        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            self?.refreshPermissionStatus()
-        }
-        permissionTimer = timer
     }
 
     @available(*, unavailable)
@@ -63,6 +58,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     deinit {
         permissionTimer?.invalidate()
         engine.stop()
+    }
+
+    override func showWindow(_ sender: Any?) {
+        super.showWindow(sender)
+        refreshPermissionStatus()
+        startPermissionPolling()
     }
 
     func stopMonitoring() {
@@ -95,6 +96,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowWillClose(_: Notification) {
+        permissionTimer?.invalidate()
+        permissionTimer = nil
         engine.stop()
     }
 
@@ -170,9 +173,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         scenarioRow.spacing = 8
         scenarioRow.addArrangedSubview(NSTextField(labelWithString: "Profile:"))
         scenarioPopup.addItems(withTitles: ScenarioPreset.all.map(\.title))
-        let savedScenario = UserDefaults.standard.string(forKey: Self.scenarioDefaultsKey)
+        let legacyScenario = UserDefaults.standard.string(forKey: Self.scenarioDefaultsKey)
+        let savedScenario = Self.currentScenarioID(for: legacyScenario)
         let selectedIndex = ScenarioPreset.all.firstIndex { $0.id == savedScenario } ?? 0
         scenarioPopup.selectItem(at: selectedIndex)
+        if savedScenario != legacyScenario {
+            UserDefaults.standard.set(savedScenario, forKey: Self.scenarioDefaultsKey)
+        }
         scenarioPopup.target = self
         scenarioPopup.action = #selector(scenarioChanged)
         scenarioRow.addArrangedSubview(scenarioPopup)
@@ -198,9 +205,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         pointerRow.addArrangedSubview(NSTextField(labelWithString: "UTM pointer:"))
         utmPointerPopup.autoenablesItems = false
         utmPointerPopup.addItems(withTitles: UTMPointerChoice.allCases.map(\.title))
-        let savedPointer = UserDefaults.standard.string(forKey: Self.utmPointerDefaultsKey)
+        let storedPointer = UserDefaults.standard.string(forKey: Self.utmPointerDefaultsKey)
+        let savedPointer = storedPointer ?? Self.legacyUTMPointer(for: legacyScenario)?.rawValue
         let pointerIndex = UTMPointerChoice.allCases.firstIndex { $0.rawValue == savedPointer } ?? 1
         utmPointerPopup.selectItem(at: pointerIndex)
+        if storedPointer == nil, let savedPointer {
+            UserDefaults.standard.set(savedPointer, forKey: Self.utmPointerDefaultsKey)
+        }
         utmPointerPopup.target = self
         utmPointerPopup.action = #selector(utmPointerChanged)
         pointerRow.addArrangedSubview(utmPointerPopup)
@@ -340,6 +351,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private func refreshPermissionStatus() {
         let accessibility = EventAccess.accessibilityEnabled ? "granted" : "missing"
         permissionLabel.stringValue = "Accessibility: \(accessibility)    Input Monitoring: not required"
+    }
+
+    private func startPermissionPolling() {
+        guard permissionTimer == nil else {
+            return
+        }
+        permissionTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.refreshPermissionStatus()
+        }
     }
 
     private func updateButtons(for state: ProbeEngineState) {
@@ -619,6 +639,29 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     private static let physicalInputDefaultsKey = "physicalInput"
     private static let utmPointerDefaultsKey = "utmPointerDevice"
     private static let logDirectoryDefaultsKey = "logDirectory"
+
+    private static func currentScenarioID(for savedID: String?) -> String? {
+        guard let savedID else {
+            return nil
+        }
+        if ScenarioPreset.all.contains(where: { $0.id == savedID }) {
+            return savedID
+        }
+        for suffix in ["-trackpad-linearmouse", "-trackpad", "-mouse"] where savedID.hasSuffix(suffix) {
+            let candidate = String(savedID.dropLast(suffix.count))
+            if ScenarioPreset.all.contains(where: { $0.id == candidate }) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private static func legacyUTMPointer(for savedID: String?) -> UTMPointerChoice? {
+        guard let savedID else {
+            return nil
+        }
+        return savedID.hasSuffix("-mouse") ? .genericMouse : .macTrackpad
+    }
 
     private static var savedLogDirectory: URL {
         guard let path = UserDefaults.standard.string(forKey: logDirectoryDefaultsKey), !path.isEmpty else {

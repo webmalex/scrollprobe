@@ -160,17 +160,6 @@ final class AppCoordinator: NSObject {
             menu.addItem(disableItem)
         }
 
-        if protectionService.state == .permissionMissing {
-            let permissionItem = NSMenuItem(
-                title: "Request Accessibility...",
-                action: #selector(requestAccessibilityAction),
-                keyEquivalent: ""
-            )
-            permissionItem.target = self
-            permissionItem.isEnabled = !diagnosticsRunning
-            menu.addItem(permissionItem)
-        }
-
         menu.addItem(.separator())
         let diagnosticsItem = NSMenuItem(
             title: "Open Diagnostics...",
@@ -280,11 +269,12 @@ final class AppCoordinator: NSObject {
     }
 
     @objc private func disableProtection() {
+        guard !diagnosticsRunning else {
+            NSSound.beep()
+            showDiagnostics()
+            return
+        }
         pauseProtection()
-    }
-
-    @objc private func requestAccessibilityAction() {
-        requestProtectionAccessibility()
     }
 
     @objc private func openDiagnostics() {

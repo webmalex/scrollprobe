@@ -41,10 +41,13 @@ public struct ScrollSample: Codable, Equatable, Sendable {
     public let eventTimestamp: UInt64
     public let integerDeltaX: Int64
     public let integerDeltaY: Int64
+    public let integerDeltaZ: Int64
     public let fixedDeltaX: Double
     public let fixedDeltaY: Double
+    public let fixedDeltaZ: Double
     public let pointDeltaX: Double
     public let pointDeltaY: Double
+    public let pointDeltaZ: Double
     public let isContinuous: Bool
     public let scrollCount: Int64
     public let scrollPhase: Int64
@@ -59,10 +62,13 @@ public struct ScrollSample: Codable, Equatable, Sendable {
         eventTimestamp = event.timestamp
         integerDeltaX = event.getIntegerValueField(.scrollWheelEventDeltaAxis2)
         integerDeltaY = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+        integerDeltaZ = event.getIntegerValueField(.scrollWheelEventDeltaAxis3)
         fixedDeltaX = event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2)
         fixedDeltaY = event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1)
+        fixedDeltaZ = event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis3)
         pointDeltaX = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis2)
         pointDeltaY = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
+        pointDeltaZ = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis3)
         isContinuous = event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
         scrollCount = event.getIntegerValueField(.scrollWheelEventScrollCount)
         scrollPhase = event.getIntegerValueField(.scrollWheelEventScrollPhase)
@@ -74,9 +80,9 @@ public struct ScrollSample: Codable, Equatable, Sendable {
     }
 
     public var hasAnyDelta: Bool {
-        integerDeltaX != 0 || integerDeltaY != 0 ||
-            fixedDeltaX != 0 || fixedDeltaY != 0 ||
-            pointDeltaX != 0 || pointDeltaY != 0
+        integerDeltaX != 0 || integerDeltaY != 0 || integerDeltaZ != 0 ||
+            fixedDeltaX != 0 || fixedDeltaY != 0 || fixedDeltaZ != 0 ||
+            pointDeltaX != 0 || pointDeltaY != 0 || pointDeltaZ != 0
     }
 
     public var isZeroDeltaChanged: Bool {
