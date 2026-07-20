@@ -608,6 +608,8 @@ singleton через `open -n` и совпадение installed executable с p
 6. Public identity прошла 6 unit tests, все pre-commit checks, release build,
    plist/codesign verification и local ad-hoc packaging. Этот ZIP не является
    public artifact: Developer ID signing изменит binary и итоговый checksum.
+7. Первый публичный GitHub Actions run для commit `dc6b93f` успешно прошёл на
+   clean `macos-15` ARM64 runner: hooks, tests, package, signature и bundle ID.
 
 ## Путь от probe к продукту
 
