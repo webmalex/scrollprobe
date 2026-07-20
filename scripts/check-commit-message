@@ -6,19 +6,28 @@ message_file=${1:?usage: check-commit-message COMMIT_MESSAGE_FILE}
 message=$(sed '/^[[:space:]]*#/d; s/\r$//' "$message_file")
 subject=$(printf '%s\n' "$message" | sed -n '1p')
 second_line=$(printf '%s\n' "$message" | sed -n '2p')
+summary=${subject#*: }
 
 fail() {
     printf 'invalid commit message: %s\n' "$1" >&2
-    printf 'expected: type(scope): lowercase imperative summary (max 72 characters)\n' >&2
+    printf 'expected: lowercase imperative summary, no final punctuation, max 72 characters\n' >&2
     printf 'see CONTRIBUTING.md for the complete convention\n' >&2
     exit 1
 }
 
 [ -n "$subject" ] || fail 'the subject is empty'
 [ "${#subject}" -le 72 ] || fail 'the subject exceeds 72 characters'
+[ "$summary" != "$subject" ] || fail 'the subject does not contain a summary'
 
-pattern='^(feat|fix|docs|refactor|test|build|ci|chore|perf|revert)(\([a-z0-9]+(-[a-z0-9]+)*\))?!?: [a-z0-9].*[[:alnum:]]$'
-printf '%s\n' "$subject" | grep -Eq "$pattern" || fail 'the subject does not match the required format'
+case "$summary" in
+    [a-z0-9]*) ;;
+    *) fail 'the summary must start with a lowercase letter or digit' ;;
+esac
+
+case "$summary" in
+    *[[:alnum:]]) ;;
+    *) fail 'the summary must end with a letter or digit' ;;
+esac
 
 if [ -n "$second_line" ]; then
     fail 'the body must be separated from the subject by a blank line'

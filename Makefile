@@ -1,13 +1,14 @@
 APP_NAME := ScrollProbe
 BUNDLE_ID := dev.scrollprobe.ScrollProbe
 CONFIGURATION ?= release
+PRE_COMMIT ?= pre-commit
 SWIFT_BUILD_DIR := .build/$(CONFIGURATION)
 DIST_DIR := dist
 APP_DIR := $(DIST_DIR)/$(APP_NAME).app
 ARCHIVE_PATH := $(DIST_DIR)/$(APP_NAME)-macos-arm64.zip
 CONTENTS_DIR := $(APP_DIR)/Contents
 
-.PHONY: all build test app package run install hooks clean
+.PHONY: all build test app package run install hooks lint clean
 
 all: test app
 
@@ -37,7 +38,10 @@ install: app
 	ditto "$(APP_DIR)" "$(HOME)/Applications/$(APP_NAME).app"
 
 hooks:
-	/opt/homebrew/bin/pre-commit install --install-hooks
+	$(PRE_COMMIT) install --install-hooks
+
+lint:
+	$(PRE_COMMIT) run --all-files
 
 clean:
 	swift package clean

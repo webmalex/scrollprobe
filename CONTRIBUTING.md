@@ -37,15 +37,37 @@ docs: document the guest installation flow
 
 For an incompatible change, add `!` before the colon and explain the impact in
 a `BREAKING CHANGE:` footer. Separate an optional body and footer from the
-header with a blank line.
+header with a blank line. Use the body to explain motivation, constraints and
+non-obvious consequences rather than repeating the diff. Wrap prose when it is
+practical, but do not wrap URLs, commands or structured trailers solely to meet
+a line-length target.
 
-## Installing the commit hook
+Use standard trailers such as `Refs:`, `Fixes:` and `Co-authored-by:` when they
+apply. Keep commits atomic: each commit should represent one coherent change
+and leave the repository in a usable state. Merge, `fixup!` and `squash!`
+commits must not remain in the published branch.
 
-Install the repository-managed `commit-msg` hook after cloning:
+## Installing the hooks
+
+Install the repository-managed `pre-commit` and `commit-msg` hooks after
+cloning. The `pre-commit` executable must be available through `PATH`:
 
 ```sh
 make hooks
 ```
 
-This invokes `/opt/homebrew/bin/pre-commit`. The hook validates every new
-commit message before Git records the commit.
+Set `PRE_COMMIT` when a non-standard executable name or path is required, for
+example `make PRE_COMMIT=/custom/path/pre-commit hooks`. The `commit-msg` hooks
+validate Conventional Commits syntax and repository-specific title style. The
+`pre-commit` hooks check whitespace, file endings, YAML, JSON and XML syntax,
+merge markers, large files, filename conflicts, private keys, symlinks,
+submodules and executable scripts.
+
+Run every file check explicitly with:
+
+```sh
+make lint
+```
+
+Local hooks can be bypassed with `--no-verify`, so the same checks should run in
+CI when the repository gains a publication workflow.

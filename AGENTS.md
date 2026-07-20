@@ -9,8 +9,8 @@
 
 * Перед созданием коммита следовать правилам из `CONTRIBUTING.md`.
 * Использовать Conventional Commits на английском: `type(scope): summary`.
-* Перед коммитом убедиться, что `commit-msg` hook из
-  `.pre-commit-config.yaml` проходит.
+* Перед коммитом запустить `make lint` и убедиться, что
+  `commit-msg` hooks из `.pre-commit-config.yaml` проходят.
 
 ## Цель
 Решить проблему со скролом в VDI
