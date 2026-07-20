@@ -9,6 +9,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private var diagnosticsWindowController: MainWindowController?
     private var permissionTimer: Timer?
+    private var menuRefreshTimer: Timer?
     private var counterMenuItem: NSMenuItem?
     private var activeTimeMenuItem: NSMenuItem?
     private var recoveryMenuItem: NSMenuItem?
@@ -45,6 +46,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     }
 
     func shutdown() {
+        stopMenuRefresh()
         permissionTimer?.invalidate()
         permissionTimer = nil
         diagnosticsWindowController?.stopMonitoring()
@@ -138,6 +140,10 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
+
+        let versionItem = NSMenuItem(title: Self.appVersionTitle, action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
 
         let stateItem = NSMenuItem(title: Self.stateTitle(protectionService.state), action: nil, keyEquivalent: "")
         stateItem.isEnabled = false
@@ -319,6 +325,27 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         loginItemStatus = SMAppService.mainApp.status
         refreshProtectionSnapshot()
         updateLoginItemMenuPresentation()
+        startMenuRefresh()
+    }
+
+    func menuDidClose(_: NSMenu) {
+        stopMenuRefresh()
+    }
+
+    private func startMenuRefresh() {
+        stopMenuRefresh()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            autoreleasepool {
+                self?.refreshProtectionSnapshot()
+            }
+        }
+        menuRefreshTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopMenuRefresh() {
+        menuRefreshTimer?.invalidate()
+        menuRefreshTimer = nil
     }
 
     private func refreshProtectionSnapshot() {
@@ -493,7 +520,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         ScrollProbe \(version) (\(build))
         macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
         Protection preference: \(protectionDesired ? "Enabled" : "Disabled")
-        Protection state: \(Self.stateTitle(protectionService.state))
+        Protection state: \(Self.stateReportValue(protectionService.state))
         Accessibility: \(EventAccess.accessibilityEnabled ? "Granted" : "Not granted")
         Launch at Login: \(Self.loginItemStatusDescription(loginItemStatus))
 
@@ -522,6 +549,28 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             return String(format: "%dd %02dh %02dm %02ds", days, hours, minutes, seconds)
         }
         return String(format: "%02dh %02dm %02ds", hours, minutes, seconds)
+    }
+
+    private static var appVersionTitle: String {
+        let bundle = Bundle.main
+        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development"
+        return "ScrollProbe \(version) (\(build))"
+    }
+
+    private static func stateReportValue(_ state: ProtectionState) -> String {
+        switch state {
+        case .disabled:
+            return "Paused"
+        case .starting:
+            return "Starting"
+        case .protected:
+            return "Active"
+        case .permissionMissing:
+            return "Accessibility Required"
+        case let .failed(message):
+            return "Failed: \(message)"
+        }
     }
 
     private static func recoveryDescription(_ recovery: ProtectionRecovery) -> String {

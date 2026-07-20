@@ -574,6 +574,20 @@ singleton через `open -n` и совпадение installed executable с p
    подписи. Архив `dist/ScrollProbe-macos-arm64.zip` имеет SHA-256
    `af56ab15ad6b558537db8996a51536aec6e567dc94056bf97808a4926fc95474`.
 
+### Lifecycle acceptance и live menu v0.5.1
+
+1. Пользователь установил `0.5.0 (8)` в guest и успешно проверил один reboot
+   VM и один pause/resume VM. В итоговом snapshot Protection был `Active`,
+   generation 1, recreations/recoveries/errors — 0; counters продолжили расти.
+2. По результатам реального использования возвращено live-обновление counters
+   и active time раз в секунду, но timer существует только пока status menu
+   открыто и удаляется в `menuDidClose`.
+3. Version/build добавлены первой неактивной строкой status menu. В `Copy Status`
+   исправлено дублирование `Protection state: Protection: Active`.
+4. Release `0.5.1 (9)` прошёл 6 unit tests, release build и строгую проверку
+   подписи. Архив `dist/ScrollProbe-macos-arm64.zip` имеет SHA-256
+   `6254e5f0e6f3ce2e914dd4e5666b0f9743ca5c61c0861df8af35bfee9320b5e8`.
+
 ## Путь от probe к продукту
 
 Принято направление: не создавать второе приложение. Один app bundle и один
