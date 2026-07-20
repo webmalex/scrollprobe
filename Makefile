@@ -7,7 +7,7 @@ APP_DIR := $(DIST_DIR)/$(APP_NAME).app
 ARCHIVE_PATH := $(DIST_DIR)/$(APP_NAME)-macos-arm64.zip
 CONTENTS_DIR := $(APP_DIR)/Contents
 
-.PHONY: all build test app package run install clean
+.PHONY: all build test app package run install hooks clean
 
 all: test app
 
@@ -35,6 +35,9 @@ run: app
 install: app
 	mkdir -p "$(HOME)/Applications"
 	ditto "$(APP_DIR)" "$(HOME)/Applications/$(APP_NAME).app"
+
+hooks:
+	/opt/homebrew/bin/pre-commit install --install-hooks
 
 clean:
 	swift package clean
