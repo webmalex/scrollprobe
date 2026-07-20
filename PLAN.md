@@ -1,6 +1,6 @@
 # План исследования scroll freeze в VDI
 
-Последнее обновление: 2026-07-18
+Последнее обновление: 2026-07-20
 
 ## Назначение документа
 
@@ -86,6 +86,9 @@ metadata должны хранить эти измерения отдельны�
 17. Opt-in `Launch at Login` реализован через `SMAppService.mainApp`. Пользователь
     подтвердил реальный автозапуск после старта ОС на host и в guest. Login-item
     launch не открывает Diagnostics window.
+18. Пользователь использует Protection постоянно. В v0.5 добавлен lifecycle
+    snapshot без постоянного counters timer: tap active time/generation,
+    disable/recreate counters, bounded recreate и обезличенный `Copy Status`.
 
 ## Что пока не доказано
 
@@ -371,9 +374,11 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 
 ## Следующий шаг
 
-Phase 1 принята, Launch at Login из Phase 2 подтвержден на host и guest. Следующий
-engineering этап - формальные working-day, sleep/wake, lock/unlock и VM
-suspend/resume tests. При регрессии сохранить target, UTM pointer и counters.
+Phase 1 принята, Launch at Login из Phase 2 подтвержден на host и guest, а v0.5
+добавляет наблюдаемость lifecycle и bounded recovery. Следующий этап - установить
+v0.5 в guest и выполнить working-day, sleep/wake, lock/unlock и VM suspend/resume
+tests. До и после каждого lifecycle события использовать `Copy Status`; при
+регрессии сохранить target, UTM pointer и оба snapshot.
 
 ## Smoke test ScrollProbe 2026-07-17
 
@@ -550,6 +555,25 @@ singleton через `open -n` и совпадение installed executable с p
 5. Локальный `tmp/dumpbtm.txt` сохранён для handoff, но не содержит явной строки
    bundle ID ScrollProbe и не коммитится из-за inventory сторонних приложений.
 
+### Lifecycle status и bounded recovery v0.5.0
+
+1. Удалён секундный timer публикации Protection counters. Текущий snapshot
+   снимается синхронно на event-tap thread только при открытии menu или выборе
+   `Copy Status`; disable/recovery публикуется сразу как отдельное событие.
+2. Menu показывает active time текущего tap, generation, число recreations и
+   recoveries. Значение времени вычисляется при открытии menu без UI timer.
+3. `Copy Status` копирует version/build, macOS, Protection/Accessibility/login
+   state, uptime, counters, последнюю recovery и ошибку без hostname, user paths,
+   input data, disk writes или network activity.
+4. После неуспешного re-enable или invalid tap выполняется максимум три recreate
+   attempts с задержками 0, 0.5 и 1 секунду. При исчерпании Protection явно
+   переходит в `Failed`; отложенные attempts отменяются при Pause/Quit.
+5. Synthetic self-check пока не добавлен: сначала нужно проверить пассивную
+   lifecycle telemetry и recovery в реальном guest.
+6. Release `0.5.0 (8)` прошёл 6 unit tests, release build и строгую проверку
+   подписи. Архив `dist/ScrollProbe-macos-arm64.zip` имеет SHA-256
+   `af56ab15ad6b558537db8996a51536aec6e567dc94056bf97808a4926fc95474`.
+
 ## Путь от probe к продукту
 
 Принято направление: не создавать второе приложение. Один app bundle и один
@@ -573,12 +597,13 @@ resources, закрытие окна не завершает agent, а ошиб�
 
 1. Opt-in `Launch at Login` через `SMAppService.mainApp` реализован и проверен на
    host/guest.
-2. Проверить reboot/login, sleep/wake, lock/unlock, VM suspend/resume и TCC revoke.
-3. Реализовать bounded tap recreate/re-enable и working-day soak.
+2. Проверить reboot/login, sleep/wake, lock/unlock, VM suspend/resume и TCC revoke
+   на v0.5 с парными `Copy Status` snapshot.
+3. Bounded tap recreate/re-enable реализован; выполнить working-day soak.
 4. Diagnostics errors не должны останавливать production protection service.
-5. Перевести lifecycle event-tap thread на nonblocking generation ownership;
-   timeout не должен освобождать callback context, пока worker ещё может его
-   использовать.
+5. Подтвердить lifecycle event-tap generation ownership stress-тестом; callback
+   инициирует teardown асинхронно на main queue, а cleanup выполняется на
+   event-tap thread после возврата callback.
 
 ### Phase 3. Private beta
 

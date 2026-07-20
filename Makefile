@@ -12,10 +12,10 @@ CONTENTS_DIR := $(APP_DIR)/Contents
 all: test app
 
 build:
-	swift build -c $(CONFIGURATION)
+	xcrun swift build -c $(CONFIGURATION)
 
 test:
-	swift test
+	xcrun swift test
 
 app: build
 	rm -rf "$(APP_DIR)"

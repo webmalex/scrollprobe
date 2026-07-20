@@ -107,7 +107,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         }
         engine.recordRuntimeEvent(
             type: "protection-recovery",
-            message: "timeout=\(counters.timeoutRecoveryCount) health=\(counters.healthRecoveryCount)"
+            message: "timeout=\(counters.timeoutRecoveryCount) " +
+                "health=\(counters.healthRecoveryCount) " +
+                "userInput=\(counters.userInputRecoveryCount)"
         )
     }
 

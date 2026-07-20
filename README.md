@@ -35,6 +35,14 @@ network requests. Приложение сохраняет boolean preference в 
 создаёт пустой lock file в `~/Library/Caches/dev.scrollprobe.ScrollProbe`, чтобы
 второй экземпляр не мог установить конкурирующий tap.
 
+Menu bar также показывает время работы текущего tap, его generation и число
+восстановлений. Эти значения вычисляются при открытии меню без нового polling
+timer. `Copy Status` помещает в clipboard обезличенный lifecycle snapshot с
+версией, состоянием permission/login item, counters и последней ошибкой; отчет
+не содержит hostname, user paths или input data. Если tap нельзя повторно
+включить после disable/fault, Protection делает не более трех попыток
+пересоздания с задержками 0, 0.5 и 1 секунду, затем явно переходит в `Failed`.
+
 ## Diagnostics
 
 Diagnostics открывается через `Open Diagnostics...` в menu bar. Оно измеряет
@@ -69,10 +77,10 @@ make package
 Готовое приложение: `dist/ScrollProbe.app`. Команда `make package` создает
 переносимый архив `dist/ScrollProbe-macos-arm64.zip`.
 
-Текущий v0.4.0 build 7 archive:
+Текущий v0.5.0 build 8 archive:
 
 ```text
-SHA-256  290804f1cd11028e78a0071446a4a8c8b6b0e68532954d8bd4c44756192d1eda
+SHA-256  af56ab15ad6b558537db8996a51536aec6e567dc94056bf97808a4926fc95474
 ```
 
 Сборка подписывается ad-hoc со стабильным локальным designated requirement по

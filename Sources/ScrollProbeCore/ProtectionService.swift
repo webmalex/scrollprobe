@@ -15,19 +15,66 @@ public struct ProtectionCounters: Equatable, Sendable {
     public let dropped: UInt64
     public let timeoutRecoveryCount: UInt64
     public let healthRecoveryCount: UInt64
+    public let userInputRecoveryCount: UInt64
 
     public init(
         observed: UInt64 = 0,
         passed: UInt64 = 0,
         dropped: UInt64 = 0,
         timeoutRecoveryCount: UInt64 = 0,
-        healthRecoveryCount: UInt64 = 0
+        healthRecoveryCount: UInt64 = 0,
+        userInputRecoveryCount: UInt64 = 0
     ) {
         self.observed = observed
         self.passed = passed
         self.dropped = dropped
         self.timeoutRecoveryCount = timeoutRecoveryCount
         self.healthRecoveryCount = healthRecoveryCount
+        self.userInputRecoveryCount = userInputRecoveryCount
+    }
+}
+
+public enum ProtectionRecoveryReason: String, Equatable, Sendable {
+    case timeout
+    case healthCheck
+    case userInput
+    case tapFault
+}
+
+public struct ProtectionRecovery: Equatable, Sendable {
+    public let reason: ProtectionRecoveryReason
+    public let date: Date
+    public let detail: String?
+
+    public init(reason: ProtectionRecoveryReason, date: Date, detail: String? = nil) {
+        self.reason = reason
+        self.date = date
+        self.detail = detail
+    }
+}
+
+public struct ProtectionSnapshot: Equatable, Sendable {
+    public let counters: ProtectionCounters
+    public let tapActiveSince: Date?
+    public let tapGeneration: UInt64
+    public let tapRecreationCount: UInt64
+    public let lastRecovery: ProtectionRecovery?
+    public let lastError: String?
+
+    public init(
+        counters: ProtectionCounters = ProtectionCounters(),
+        tapActiveSince: Date? = nil,
+        tapGeneration: UInt64 = 0,
+        tapRecreationCount: UInt64 = 0,
+        lastRecovery: ProtectionRecovery? = nil,
+        lastError: String? = nil
+    ) {
+        self.counters = counters
+        self.tapActiveSince = tapActiveSince
+        self.tapGeneration = tapGeneration
+        self.tapRecreationCount = tapRecreationCount
+        self.lastRecovery = lastRecovery
+        self.lastError = lastError
     }
 }
 
@@ -61,12 +108,19 @@ public final class ProtectionService {
 
     private var eventThread: EventTapThread?
     private var eventTap: EventTapHandle?
-    private var countersTimer: Timer?
     private var observed: UInt64 = 0
     private var passed: UInt64 = 0
     private var dropped: UInt64 = 0
     private var timeoutRecoveryCount: UInt64 = 0
     private var healthRecoveryCount: UInt64 = 0
+    private var userInputRecoveryCount: UInt64 = 0
+    private var tapActiveSince: Date?
+    private var tapGeneration: UInt64 = 0
+    private var tapRecreationCount: UInt64 = 0
+    private var lastRecovery: ProtectionRecovery?
+    private var lastError: String?
+    private var recreationAttempt = 0
+    private var recreationWorkItem: DispatchWorkItem?
 
     public init() {}
 
@@ -85,28 +139,20 @@ public final class ProtectionService {
         }
 
         resetCounters()
-
-        let eventThread = EventTapThread()
-        self.eventThread = eventThread
-        eventThread.start()
+        lastError = nil
+        recreationAttempt = 0
         updateState(.starting)
-        guard state == .starting, self.eventThread === eventThread else {
-            return false
-        }
-
         do {
-            try eventThread.performSync { [weak self] in
-                guard let self else {
-                    throw EventTapThreadError.notRunning
-                }
-                try self.installTapAndTimer()
-            }
+            try installTapThread()
         } catch {
             _ = cleanupTapThread()
+            lastError = error.localizedDescription
             updateState(.failed(error.localizedDescription))
             return false
         }
 
+        tapGeneration &+= 1
+        tapActiveSince = Date()
         updateState(.protected)
         return true
     }
@@ -115,11 +161,52 @@ public final class ProtectionService {
         guard state != .disabled else {
             return
         }
+        recreationWorkItem?.cancel()
+        recreationWorkItem = nil
+        recreationAttempt = 0
         let didCleanUp = cleanupTapThread()
         updateState(didCleanUp ? .disabled : .failed("Protection tap teardown could not be confirmed."))
     }
 
-    private func installTapAndTimer() throws {
+    public func snapshot() -> ProtectionSnapshot {
+        let counters: ProtectionCounters
+        if let eventThread,
+           let currentCounters = try? eventThread.performSync({ [self] in makeCounters() }) {
+            counters = currentCounters
+        } else {
+            counters = makeCounters()
+        }
+        return ProtectionSnapshot(
+            counters: counters,
+            tapActiveSince: tapActiveSince,
+            tapGeneration: tapGeneration,
+            tapRecreationCount: tapRecreationCount,
+            lastRecovery: lastRecovery,
+            lastError: lastError
+        )
+    }
+
+    private func installTapThread() throws {
+        let eventThread = EventTapThread()
+        self.eventThread = eventThread
+        eventThread.start()
+        guard state == .starting, self.eventThread === eventThread else {
+            throw EventTapThreadError.notRunning
+        }
+        do {
+            try eventThread.performSync { [weak self] in
+                guard let self else {
+                    throw EventTapThreadError.notRunning
+                }
+                try self.installTap()
+            }
+        } catch {
+            _ = cleanupTapThread()
+            throw error
+        }
+    }
+
+    private func installTap() throws {
         eventTap = try EventTapHandle(
             name: "protection",
             stage: .ingress,
@@ -136,14 +223,6 @@ public final class ProtectionService {
                 self?.handleFault(message)
             }
         )
-
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            autoreleasepool {
-                self?.publishCounters()
-            }
-        }
-        countersTimer = timer
-        RunLoop.current.add(timer, forMode: .common)
     }
 
     private func handle(_ event: CGEvent) -> TapDecision {
@@ -165,8 +244,9 @@ public final class ProtectionService {
         case .healthCheck:
             healthRecoveryCount &+= 1
         case .userInput:
-            break
+            userInputRecoveryCount &+= 1
         }
+        publishCounters(recovery: ProtectionRecovery(reason: reason.recoveryReason, date: Date()))
     }
 
     private func handleFault(_ message: String) {
@@ -174,8 +254,51 @@ public final class ProtectionService {
             guard let self, self.state == .protected || self.state == .starting else {
                 return
             }
+            self.lastError = message
+            let recentlyRecordedDisable = self.lastRecovery.map {
+                Date().timeIntervalSince($0.date) <= 1
+            } ?? false
+            if !recentlyRecordedDisable {
+                self.lastRecovery = ProtectionRecovery(reason: .tapFault, date: Date(), detail: message)
+            }
             _ = self.cleanupTapThread()
-            self.updateState(.failed(message))
+            self.updateState(.starting)
+            self.scheduleRecreation()
+        }
+    }
+
+    private func scheduleRecreation() {
+        guard let delay = TapRecreationPolicy.delay(forAttempt: recreationAttempt) else {
+            updateState(.failed(lastError ?? "Protection tap could not be recovered."))
+            return
+        }
+
+        recreationAttempt += 1
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.performRecreationAttempt()
+        }
+        recreationWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + delay,
+            execute: workItem
+        )
+    }
+
+    private func performRecreationAttempt() {
+        guard state == .starting else {
+            return
+        }
+        do {
+            try installTapThread()
+            tapGeneration &+= 1
+            tapRecreationCount &+= 1
+            tapActiveSince = Date()
+            recreationAttempt = 0
+            recreationWorkItem = nil
+            updateState(.protected)
+        } catch {
+            lastError = error.localizedDescription
+            scheduleRecreation()
         }
     }
 
@@ -185,26 +308,22 @@ public final class ProtectionService {
         if let eventThread {
             do {
                 try eventThread.performSync { [weak self] in
-                    self?.countersTimer?.invalidate()
-                    self?.countersTimer = nil
                     self?.eventTap?.invalidate()
                     self?.eventTap = nil
                 }
             } catch {
                 didInvalidate = false
-                countersTimer?.invalidate()
-                countersTimer = nil
                 eventTap?.invalidate()
                 eventTap = nil
             }
             eventThread.stop()
             self.eventThread = nil
+            tapActiveSince = nil
             return didInvalidate
         }
-        countersTimer?.invalidate()
-        countersTimer = nil
         eventTap?.invalidate()
         eventTap = nil
+        tapActiveSince = nil
         return didInvalidate
     }
 
@@ -214,19 +333,35 @@ public final class ProtectionService {
         dropped = 0
         timeoutRecoveryCount = 0
         healthRecoveryCount = 0
+        userInputRecoveryCount = 0
+        tapGeneration = 0
+        tapRecreationCount = 0
+        tapActiveSince = nil
+        lastRecovery = nil
         publishCounters()
     }
 
-    private func publishCounters() {
-        let counters = ProtectionCounters(
+    private func makeCounters() -> ProtectionCounters {
+        ProtectionCounters(
             observed: observed,
             passed: passed,
             dropped: dropped,
             timeoutRecoveryCount: timeoutRecoveryCount,
-            healthRecoveryCount: healthRecoveryCount
+            healthRecoveryCount: healthRecoveryCount,
+            userInputRecoveryCount: userInputRecoveryCount
         )
+    }
+
+    private func publishCounters(recovery: ProtectionRecovery? = nil) {
+        let counters = makeCounters()
         DispatchQueue.main.async { [weak self] in
-            self?.onCounters?(counters)
+            guard let self else {
+                return
+            }
+            if let recovery {
+                self.lastRecovery = recovery
+            }
+            self.onCounters?(counters)
         }
     }
 
@@ -239,6 +374,30 @@ public final class ProtectionService {
             publish()
         } else {
             DispatchQueue.main.async(execute: publish)
+        }
+    }
+}
+
+enum TapRecreationPolicy {
+    static let delays: [TimeInterval] = [0, 0.5, 1]
+
+    static func delay(forAttempt attempt: Int) -> TimeInterval? {
+        guard delays.indices.contains(attempt) else {
+            return nil
+        }
+        return delays[attempt]
+    }
+}
+
+private extension TapDisableReason {
+    var recoveryReason: ProtectionRecoveryReason {
+        switch self {
+        case .timeout:
+            return .timeout
+        case .userInput:
+            return .userInput
+        case .healthCheck:
+            return .healthCheck
         }
     }
 }

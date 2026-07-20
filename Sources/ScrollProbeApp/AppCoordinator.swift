@@ -10,11 +10,15 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
     private var diagnosticsWindowController: MainWindowController?
     private var permissionTimer: Timer?
     private var counterMenuItem: NSMenuItem?
+    private var activeTimeMenuItem: NSMenuItem?
+    private var recoveryMenuItem: NSMenuItem?
     private var loginItemMenuItem: NSMenuItem?
     private var loginItemApprovalMenuItem: NSMenuItem?
     private var counters = ProtectionCounters()
+    private var protectionSnapshot = ProtectionSnapshot()
     private var diagnosticsRunning = false
     private var loginItemStatus = SMAppService.mainApp.status
+    private let processStartedAt = Date()
 
     private var protectionDesired: Bool {
         UserDefaults.standard.bool(forKey: Self.protectionEnabledKey)
@@ -82,6 +86,7 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             guard let self else {
                 return
             }
+            self.refreshProtectionSnapshot()
             self.updateStatusButton()
             self.rebuildMenu()
             self.updateDiagnosticsProtectionStatus()
@@ -92,10 +97,12 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
             }
             let previousCounters = self.counters
             self.counters = counters
+            self.protectionSnapshot = self.protectionService.snapshot()
             self.counterMenuItem?.title = Self.counterTitle(counters)
             if self.diagnosticsRunning,
                counters.timeoutRecoveryCount != previousCounters.timeoutRecoveryCount ||
-               counters.healthRecoveryCount != previousCounters.healthRecoveryCount {
+               counters.healthRecoveryCount != previousCounters.healthRecoveryCount ||
+               counters.userInputRecoveryCount != previousCounters.userInputRecoveryCount {
                 self.diagnosticsWindowController?.recordProtectionRecovery(counters)
             }
             self.updateDiagnosticsProtectionStatus()
@@ -140,6 +147,24 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         counterItem.isEnabled = false
         counterMenuItem = counterItem
         menu.addItem(counterItem)
+
+        let activeTimeItem = NSMenuItem(
+            title: Self.activeTimeTitle(protectionSnapshot),
+            action: nil,
+            keyEquivalent: ""
+        )
+        activeTimeItem.isEnabled = false
+        activeTimeMenuItem = activeTimeItem
+        menu.addItem(activeTimeItem)
+
+        let recoveryItem = NSMenuItem(
+            title: Self.recoveryTitle(protectionSnapshot),
+            action: nil,
+            keyEquivalent: ""
+        )
+        recoveryItem.isEnabled = false
+        recoveryMenuItem = recoveryItem
+        menu.addItem(recoveryItem)
         menu.addItem(.separator())
 
         let primaryItem = NSMenuItem(
@@ -194,6 +219,14 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         )
         diagnosticsItem.target = self
         menu.addItem(diagnosticsItem)
+
+        let copyStatusItem = NSMenuItem(
+            title: "Copy Status",
+            action: #selector(copyStatus),
+            keyEquivalent: ""
+        )
+        copyStatusItem.target = self
+        menu.addItem(copyStatusItem)
 
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "Quit ScrollProbe", action: #selector(quit), keyEquivalent: "q")
@@ -284,7 +317,17 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_: NSMenu) {
         loginItemStatus = SMAppService.mainApp.status
+        refreshProtectionSnapshot()
         updateLoginItemMenuPresentation()
+    }
+
+    private func refreshProtectionSnapshot() {
+        protectionSnapshot = protectionService.snapshot()
+        counters = protectionSnapshot.counters
+        counterMenuItem?.title = Self.counterTitle(counters)
+        activeTimeMenuItem?.title = Self.activeTimeTitle(protectionSnapshot)
+        recoveryMenuItem?.title = Self.recoveryTitle(protectionSnapshot)
+        updateDiagnosticsProtectionStatus()
     }
 
     private func setLaunchAtLogin() {
@@ -371,6 +414,14 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
         showDiagnostics()
     }
 
+    @objc private func copyStatus() {
+        loginItemStatus = SMAppService.mainApp.status
+        refreshProtectionSnapshot()
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(statusReport(), forType: .string)
+    }
+
     @objc private func toggleLaunchAtLogin() {
         setLaunchAtLogin()
     }
@@ -413,6 +464,98 @@ final class AppCoordinator: NSObject, NSMenuDelegate {
 
     private static func counterTitle(_ counters: ProtectionCounters) -> String {
         "Filtered: \(counters.dropped)    Passed: \(counters.passed)"
+    }
+
+    private static func activeTimeTitle(_ snapshot: ProtectionSnapshot) -> String {
+        guard let activeSince = snapshot.tapActiveSince else {
+            return "Tap active time: —    Generation: \(snapshot.tapGeneration)"
+        }
+        return "Tap active: \(duration(since: activeSince))    Generation: \(snapshot.tapGeneration)"
+    }
+
+    private static func recoveryTitle(_ snapshot: ProtectionSnapshot) -> String {
+        let recoveryCount = snapshot.counters.timeoutRecoveryCount +
+            snapshot.counters.healthRecoveryCount +
+            snapshot.counters.userInputRecoveryCount
+        return "Tap recreations: \(snapshot.tapRecreationCount)    Recoveries: \(recoveryCount)"
+    }
+
+    private func statusReport() -> String {
+        let bundle = Bundle.main
+        let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development"
+        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development"
+        let snapshot = protectionSnapshot
+        let activeTime = snapshot.tapActiveSince.map(Self.duration(since:)) ?? "Not active"
+        let lastRecovery = snapshot.lastRecovery.map(Self.recoveryDescription) ?? "Never"
+        let lastError = snapshot.lastError ?? "None"
+
+        return """
+        ScrollProbe \(version) (\(build))
+        macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
+        Protection preference: \(protectionDesired ? "Enabled" : "Disabled")
+        Protection state: \(Self.stateTitle(protectionService.state))
+        Accessibility: \(EventAccess.accessibilityEnabled ? "Granted" : "Not granted")
+        Launch at Login: \(Self.loginItemStatusDescription(loginItemStatus))
+
+        Process uptime: \(Self.duration(since: processStartedAt))
+        Tap active time: \(activeTime)
+        Tap generation: \(snapshot.tapGeneration)
+        Tap recreations: \(snapshot.tapRecreationCount)
+        Observed events: \(snapshot.counters.observed)
+        Filtered events: \(snapshot.counters.dropped)
+        Passed events: \(snapshot.counters.passed)
+        Disabled by timeout: \(snapshot.counters.timeoutRecoveryCount)
+        Disabled by user input: \(snapshot.counters.userInputRecoveryCount)
+        Health-check recoveries: \(snapshot.counters.healthRecoveryCount)
+        Last recovery: \(lastRecovery)
+        Last error: \(lastError)
+        """
+    }
+
+    private static func duration(since date: Date) -> String {
+        let totalSeconds = max(0, Int(Date().timeIntervalSince(date)))
+        let days = totalSeconds / 86_400
+        let hours = totalSeconds % 86_400 / 3_600
+        let minutes = totalSeconds % 3_600 / 60
+        let seconds = totalSeconds % 60
+        if days > 0 {
+            return String(format: "%dd %02dh %02dm %02ds", days, hours, minutes, seconds)
+        }
+        return String(format: "%02dh %02dm %02ds", hours, minutes, seconds)
+    }
+
+    private static func recoveryDescription(_ recovery: ProtectionRecovery) -> String {
+        let timestamp = ISO8601DateFormatter().string(from: recovery.date)
+        let reason: String
+        switch recovery.reason {
+        case .timeout:
+            reason = "timeout"
+        case .healthCheck:
+            reason = "health check"
+        case .userInput:
+            reason = "user input disable"
+        case .tapFault:
+            reason = "tap fault"
+        }
+        if let detail = recovery.detail {
+            return "\(timestamp) (\(reason): \(detail))"
+        }
+        return "\(timestamp) (\(reason))"
+    }
+
+    private static func loginItemStatusDescription(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .enabled:
+            return "Enabled"
+        case .requiresApproval:
+            return "Requires approval"
+        case .notRegistered:
+            return "Disabled"
+        case .notFound:
+            return "Not found"
+        @unknown default:
+            return "Unknown"
+        }
     }
 
     private static func loginItemTitle(_ status: SMAppService.Status) -> String {
