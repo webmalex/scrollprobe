@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   test:
@@ -22,10 +25,29 @@ jobs:
         run: make test
 
       - name: Build ad-hoc release artifact
-        run: make package
+        run: make verify-package
 
-      - name: Verify app signature and metadata
+      - name: Locate release artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        id: artifact
+        shell: bash
         run: |
-          codesign --verify --deep --strict --verbose=2 dist/ScrollProbe.app
-          test "$(defaults read "$PWD/dist/ScrollProbe.app/Contents/Info" CFBundleIdentifier)" = \
-            "io.github.webmalex.ScrollProbe"
+          archive_path="$(make --silent print-archive-path)"
+          echo "archive_path=$archive_path" >> "$GITHUB_OUTPUT"
+          echo "archive_name=$(basename "${archive_path%.zip}")" >> "$GITHUB_OUTPUT"
+
+      - name: Attest release artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.artifact.outputs.archive_path }}
+
+      - name: Upload release artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.archive_name }}
+          path: |
+            ${{ steps.artifact.outputs.archive_path }}
+            ${{ steps.artifact.outputs.archive_path }}.sha256
+          if-no-files-found: error
