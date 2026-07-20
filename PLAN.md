@@ -369,7 +369,7 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | Drop-all bypass mode | Реализован, не нужен для рабочего workaround |
 | Zero-delta changed filter | Подтверждённый workaround, Ubuntu/Windows без freeze |
 | Menu-bar protection agent | Реализован в v0.3, guest acceptance успешен |
-| Public beta preparation | v0.6 identity и GitHub-attested workflow готовы |
+| Public beta | `v0.6.0-beta.1` опубликована с SHA и attestation |
 | Developer ID notarization | Недоступна без платного membership; отложена |
 | Throttling filter | Не требуется при текущем targeted workaround |
 | IOHID/DriverKit | Не требуется при работающем CGEventTap workaround |
@@ -377,11 +377,12 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 ## Следующий шаг
 
 Рабочий workaround принят и постоянно используется. Репозиторий опубликован как
-`webmalex/scrollprobe`. Следующий шаг public beta: получить ad-hoc signed ZIP из
-GitHub-hosted CI вместе с SHA-256 и artifact attestation, проверить именно этот
-архив локальной чистой установкой и затем опубликовать его как prerelease.
-Developer ID/notarization отложены и не блокируют честно обозначенную
-experimental beta. Lifecycle tests продолжаются параллельно.
+`webmalex/scrollprobe`, а `v0.6.0-beta.1` доступна как GitHub prerelease.
+Следующий шаг — опубликовать технический Reddit-анонс с точной топологией,
+измерениями, ограничениями и ссылкой на beta, затем собирать первые независимые
+`Copy Status` и configuration reports. Developer ID/notarization отложены и не
+блокируют честно обозначенную experimental beta. Lifecycle tests продолжаются
+параллельно.
 
 ## Smoke test ScrollProbe 2026-07-17
 
@@ -612,6 +613,15 @@ singleton через `open -n` и совпадение installed executable с p
    plist/codesign verification и local ad-hoc packaging.
 7. Первый публичный GitHub Actions run для commit `dc6b93f` успешно прошёл на
    clean `macos-15` ARM64 runner: hooks, tests, package, signature и bundle ID.
+8. Commit `08f3da3` прошёл GitHub-hosted CI run `29724494278`; exact artifact
+   повторно скачан, checksum, bundle metadata/signature и Sigstore-backed
+   attestation проверены. SHA-256 ZIP:
+   `64197275dac07c37d61261a30512222adc675d29387ab352aad4c0001b1d4e1f`.
+9. Пользователь подтвердил рабочую `0.6.0 (10)` с active Protection без tap
+   recreations/recoveries/errors; отдельный запуск на host не вызвал Gatekeeper
+   warning. Проверенный ZIP и `.sha256` опубликованы как GitHub prerelease
+   `v0.6.0-beta.1`, затем заново скачаны с Release и прошли SHA/attestation
+   verification.
 
 ## Путь от probe к продукту
 
