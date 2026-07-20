@@ -69,5 +69,5 @@ Run every file check explicitly with:
 make lint
 ```
 
-Local hooks can be bypassed with `--no-verify`, so the same checks should run in
-CI when the repository gains a publication workflow.
+Local hooks can be bypassed with `--no-verify`, so the same checks also run in
+CI together with the Swift tests and an ad-hoc release build.

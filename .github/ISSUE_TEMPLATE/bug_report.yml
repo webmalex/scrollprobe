@@ -1,0 +1,79 @@
+name: Bug report
+description: Report a Protection failure or compatibility problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach raw Diagnostics JSONL without reviewing and redacting it.
+        Raw logs can contain a hostname, executable paths, and process inventory.
+
+  - type: textarea
+    id: status
+    attributes:
+      label: Copy Status output
+      description: Select Copy Status in the ScrollProbe menu and paste it here.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host Mac and macOS
+      placeholder: M1 Max, macOS 15.7.7
+    validations:
+      required: true
+
+  - type: input
+    id: guest
+    attributes:
+      label: UTM and guest macOS
+      placeholder: UTM 4.7.5, guest macOS 15.7.7
+    validations:
+      required: true
+
+  - type: input
+    id: horizon
+    attributes:
+      label: Horizon Client and remote OS
+      placeholder: Horizon 2312.1, Ubuntu 20.04.6
+    validations:
+      required: true
+
+  - type: dropdown
+    id: pointer
+    attributes:
+      label: UTM pointer device
+      options:
+        - Mac Trackpad
+        - Generic Mouse
+        - Other or unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the expected result, actual result, and lifecycle event if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start ...
+        2. Scroll ...
+        3. Observe ...
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I reviewed this report and removed private hostnames, usernames, and paths.
+          required: true

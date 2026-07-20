@@ -1,73 +1,130 @@
 # ScrollProbe
 
-`ScrollProbe.app` содержит два независимых режима работы:
+ScrollProbe is an experimental macOS menu bar app that prevents severe trackpad
+scroll freezes in a specific nested UTM and VMware Horizon setup.
 
-- `Protection`: постоянно удаляет доказанно патологические scroll events без
-  окна, JSONL и downstream tap;
-- `Diagnostics`: опциональное окно для парных host/guest измерений и
-  экспериментальных режимов.
+It was built for this confirmed path:
 
-ScrollProbe никогда не синтезирует события и не изменяет delta/phase существующих
-событий.
+```text
+Apple Silicon Mac
+  -> UTM macOS guest (Apple Virtualization.framework)
+    -> VPN
+      -> VMware Horizon Client
+        -> Ubuntu or Windows VDI
+```
 
-## Protection
+One physical trackpad gesture can become tens of thousands of zero-delta
+`scrollPhase=changed` events inside the macOS guest. Horizon then becomes
+unresponsive for seconds, and the VDI connection can degrade or reconnect.
+ScrollProbe removes only that pathological event class before it reaches
+Horizon.
 
-После первого запуска в menu bar появляется shield icon. Protection можно
-включить из этого меню или кнопкой `Enable Protection` в Diagnostics:
+> [!WARNING]
+> ScrollProbe is an experimental workaround for a reproduced virtualization
+> bug, not a universal Horizon or scrolling fix. Read the compatibility and
+> privacy sections before enabling it.
 
-1. Явно включить Protection и один раз выдать Accessibility.
-2. Убедиться, что статус стал `Protection: Active`.
-3. Закрыть Diagnostics window. Приложение и filter продолжат работать в menu bar.
-4. Для временного отключения выбрать `Pause Protection`.
+## What it does
 
-Protection сохраняет явный выбор пользователя и автоматически включается при
-следующем запуске приложения. Checkbox `Launch at Login` в menu bar регистрирует
-основной app через `SMAppService.mainApp`; после входа пользователя agent
-запускается без Diagnostics window. Если macOS требует повторного согласия, menu
-показывает отдельный переход в System Settings > General > Login Items.
+Protection mode installs one active Core Graphics HID event tap and drops an
+event only when all of the following are true:
 
-Production filter имеет один active `kCGHIDEventTap + headInsert + default` и
-удаляет только события без delta на всех трёх axes с
-`scrollPhase=changed` и без momentum phase. Begin/end/cancel, momentum и любое
-реальное перемещение всегда пропускаются. Callback ведёт только лёгкие счётчики
-в памяти; Protection не записывает input data или diagnostic logs и не делает
-network requests. Приложение сохраняет boolean preference в `UserDefaults` и
-создаёт пустой lock file в `~/Library/Caches/dev.scrollprobe.ScrollProbe`, чтобы
-второй экземпляр не мог установить конкурирующий tap.
+- all integer, fixed-point, and point deltas on all three axes are zero;
+- `scrollPhase` is `changed`;
+- momentum phase is absent.
 
-Первая строка menu bar показывает version/build. Ниже видны время работы
-текущего tap, его generation и число восстановлений. Пока menu открыто, counters
-и active time обновляются раз в секунду; при закрытии единственный UI timer
-сразу удаляется. `Copy Status` помещает в clipboard обезличенный lifecycle
-snapshot с версией, состоянием permission/login item, counters и последней
-ошибкой; отчет не содержит hostname, user paths или input data. Если tap нельзя
-повторно включить после disable/fault, Protection делает не более трех попыток
-пересоздания с задержками 0, 0.5 и 1 секунду, затем явно переходит в `Failed`.
+Events carrying real movement, momentum, or gesture lifecycle phases are passed
+unchanged. ScrollProbe never synthesizes input and does not rewrite scroll
+distance or direction.
+
+The filter reduced tested guest streams from tens of thousands of events to
+normal tens or hundreds without freezes:
+
+| UTM pointer | VDI target | Guest ingress | Dropped | Passed downstream |
+|---|---|---:|---:|---:|
+| Generic Mouse | Windows | 41,495 | 41,425 | 70 |
+| Mac Trackpad | Windows | 17,184 | 17,118 | 66 |
+| Mac Trackpad | Ubuntu stress run | 40,615 | 40,137 | 472 |
+| Mac Trackpad | Windows stress run | 35,250 | 34,311 | 932 |
+
+## Compatibility
+
+Confirmed configuration:
+
+- Apple Silicon host;
+- host and UTM guest running macOS 15.7.7;
+- UTM 4.7.5 using Apple Virtualization.framework;
+- VMware Horizon Client 2312.1 (`8.12.1`) inside the guest;
+- Ubuntu 20.04.6 and Windows Server 2019 VDI targets;
+- both UTM `Mac Trackpad` and `Generic Mouse` pointer modes.
+
+The app has not yet been independently tested with other macOS, UTM, or Horizon
+versions. Bluetooth mouse scrolling is expected to remain unaffected, but the
+formal control matrix is not complete.
+
+## Install a release
+
+Public release archives will be attached to the
+[GitHub Releases](https://github.com/webmalex/scrollprobe/releases) page.
+
+1. Download `ScrollProbe-<version>-macos-arm64.zip` and extract it.
+2. Move `ScrollProbe.app` to `/Applications` or `~/Applications`.
+3. Open the app and choose `Enable Protection`.
+4. Grant ScrollProbe access in **System Settings > Privacy & Security >
+   Accessibility**.
+5. Confirm that the menu bar shield reports `Protection: Active`.
+6. Optionally enable `Launch at Login` from the menu.
+
+The app does not require a separate Input Monitoring permission.
+
+### Migrating from pre-public builds
+
+Version `0.6.0` adopts the final public bundle identifier
+`io.github.webmalex.ScrollProbe`. If you used build 9 or earlier:
+
+1. In the old ScrollProbe menu, disable `Launch at Login`.
+2. Quit the old app.
+3. Remove the old ScrollProbe entry from Accessibility settings.
+4. Replace the app and launch the new build.
+5. Grant Accessibility and enable `Launch at Login` again.
+
+This is a one-time migration. Future builds will keep the public identifier.
+
+## Using Protection
+
+The menu bar shield shows the actual service state, filtered/passed counters,
+tap uptime, generation, and recovery counts. Counters refresh once per second
+only while the menu is open.
+
+`Copy Status` creates a clipboard report suitable for an issue. It contains
+version, OS, permission state, aggregate counters, and lifecycle information;
+it does not contain a hostname, user paths, or input contents.
+
+Protection runs without a window, network access, telemetry, or diagnostic log.
+If macOS disables its event tap, ScrollProbe attempts bounded recovery and
+reports `Failed` rather than retrying forever.
 
 ## Diagnostics
 
-Diagnostics открывается через `Open Diagnostics...` в menu bar. Оно измеряет
-scroll-события в двух точках:
+`Open Diagnostics...` exposes the research tools used to validate the filter:
 
-- ingress: `kCGHIDEventTap + headInsert + default`, принимает решение pass/drop;
-- downstream: `kCGAnnotatedSessionEventTap + tailAppend + listenOnly`.
+- paired ingress/downstream monitoring;
+- targeted zero-delta filtering;
+- a time-limited experimental drop-all mode;
+- event-tap inventory and JSONL metrics.
 
-Diagnostic modes:
+Diagnostics are opt-in and separate from background Protection. Diagnostic logs
+can contain a hostname, process identifiers, executable paths, and detailed
+scroll timing/delta metadata. Review and redact them before sharing. See
+[PRIVACY.md](PRIVACY.md) for the complete data behavior.
 
-- `Monitor only`: пропускает все события и только измеряет их.
-- `Drop zero-delta changed events`: удаляет только события без любой delta с
-  `scrollPhase=changed` и без momentum phase. Begin/end/cancel, momentum и все
-  события с реальным перемещением сохраняются.
-- `Drop all`: удаляет все scroll events в течение 10 секунд после установки
-  taps, затем автоматически продолжает в monitor-only режиме.
+The investigation history, measurements, hypotheses, and remaining lifecycle
+tests are maintained in [PLAN.md](PLAN.md).
 
-Экспериментальные drop-режимы доступны только для guest profiles и только когда
-background Protection поставлен на паузу. Во время diagnostic run состояние
-Protection заморожено, чтобы tap ordering и смысл лога не менялись на ходу.
+## Build from source
 
-## Сборка
-
-Требования: macOS 15+, Xcode Command Line Tools и принятая лицензия Xcode.
+Requirements: macOS 15+, Apple Silicon, Xcode with its license accepted, and
+Swift 6.
 
 ```sh
 make test
@@ -75,145 +132,52 @@ make app
 make package
 ```
 
-Готовое приложение: `dist/ScrollProbe.app`. Команда `make package` создает
-переносимый архив `dist/ScrollProbe-macos-arm64.zip`.
-
-Текущий v0.5.1 build 9 archive:
+The local development build is ad-hoc signed. Output:
 
 ```text
-SHA-256  6254e5f0e6f3ce2e914dd4e5666b0f9743ca5c61c0861df8af35bfee9320b5e8
+dist/ScrollProbe.app
+dist/ScrollProbe-0.6.0-macos-arm64.zip
 ```
 
-Сборка подписывается ad-hoc со стабильным локальным designated requirement по
-bundle ID. Обычная ad-hoc подпись привязана к `cdhash`, из-за чего macOS считает
-каждую пересборку новым приложением и старая запись Accessibility перестает
-работать. После перехода на стабильное requirement старую запись нужно один раз
-удалить и выдать право заново. Последующие локальные пересборки сохраняют то же
-requirement.
+Install repository hooks with `make hooks` and run all checks with `make lint`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions.
 
-Identifier-only requirement подходит только для локального диагностического
-инструмента. Для распространения нужна настоящая Developer ID подпись.
+## Maintainer release build
 
-## Разрешения
-
-1. Запустить `dist/ScrollProbe.app`.
-2. Нажать `Enable Protection` или `Request Accessibility` и включить ScrollProbe
-   в System Settings.
-3. Protection автоматически повторит запуск после выдачи права. Если macOS не
-   применил его сразу, перезапустить приложение.
-
-Отдельный Input Monitoring не требуется. Accessibility уже разрешает активный
-HID tap, а downstream listen-only tap подтвержденно работает с тем же доступом.
-На macOS 15 `CGRequestListenEventAccess()` также может не добавить приложение в
-таблицу Input Monitoring, даже когда tap успешно создан, поэтому отдельного
-permission flow в приложении нет.
-
-Работоспособность background filter определяется фактическим статусом
-`Protection: Active` и ростом menu-bar counters. Для Diagnostics после `Start`
-должен расти `ingress.totalObserved`; в monitor mode также растёт downstream.
-
-## Перенос в guest
-
-Собирать приложение в guest не нужно. Host и guest используют Apple Silicon и
-macOS 15, поэтому в обеих системах запускается один и тот же собранный bundle.
-
-1. Скопировать `dist/ScrollProbe.app` из UTM shared directory в
-   `~/Applications` или `/Applications`. Прямое копирование bundle достаточно.
-2. Первый раз запустить через Finder командой `Open` из контекстного меню.
-3. Выдать Accessibility внутри guest и при необходимости перезапустить app.
-
-TCC-базы host и guest независимы, поэтому право выдается один раз в каждой ОС.
-Xcode, Swift и остальные инструменты сборки в guest не требуются. ZIP от
-`make package` является только запасным способом переноса для файловых систем,
-которые повреждают структуру bundle или executable attributes.
-
-Перед заменой уже установленного bundle нужно выбрать `Quit ScrollProbe` в menu
-bar. Новый экземпляр намеренно завершится, пока старый процесс с тем же bundle ID
-ещё работает.
-
-Если macOS сохранила quarantine attribute и продолжает блокировать локальный
-диагностический bundle, удалить его уже после копирования в `~/Applications`:
+A public binary must use a Developer ID Application certificate, Hardened
+Runtime, a secure timestamp, and Apple notarization. Store notarization
+credentials in Keychain, then run:
 
 ```sh
-xattr -dr com.apple.quarantine "$HOME/Applications/ScrollProbe.app"
+make test lint
+make release-package \
+  SIGN_IDENTITY="Developer ID Application: Example Name (TEAMID)" \
+  NOTARY_PROFILE="scrollprobe-notary"
 ```
 
-## Diagnostic Logs
+The target signs the app, submits a temporary ZIP to the Apple notary service,
+staples and validates the ticket, checks Gatekeeper acceptance, creates the
+final ZIP, and prints its SHA-256 checksum. Credentials and private keys are
+never stored in the repository.
 
-Только явный запуск Diagnostics создаёт JSONL. Background Protection ничего не
-пишет. Каталог по умолчанию:
+## Uninstall
 
-```text
-~/Library/Logs/ScrollProbe/scrollprobe-<UTC>-<RUN_ID>.jsonl
+1. Disable `Launch at Login` in the ScrollProbe menu.
+2. Choose `Quit ScrollProbe`.
+3. Move `ScrollProbe.app` to Trash.
+4. Remove ScrollProbe from Accessibility settings.
+5. Optionally remove its preference domain, cache directory, and diagnostic
+   logs:
+
+```sh
+defaults delete io.github.webmalex.ScrollProbe
+rm -r "$HOME/Library/Caches/io.github.webmalex.ScrollProbe"
+rm -r "$HOME/Library/Logs/ScrollProbe"
 ```
 
-Кнопка `Choose log folder...` позволяет выбрать и сохранить другой каталог,
-включая доступный из guest shared-каталог репозитория `logs/`. Если запись в
-выбранный каталог перестает работать, run завершается с ошибкой вместо тихой
-потери данных.
+The last command deletes only explicitly created Diagnostics logs. Protection
+mode does not create them.
 
-Типы записей:
+## License
 
-- `run-start`: версия app, ОС, host, PID, profile, physical input, UTM pointer,
-  mode, background Protection и конфигурация taps;
-- `tap-inventory`: зарегистрированные taps и процессы;
-- `metrics`: секундные агрегаты и фактически активный mode;
-- `mode-change`: автоматическое завершение временного drop-all;
-- `protection-state` и `protection-recovery`: изменения background tap во время
-  diagnostics;
-- `run-stop` или `error`.
-
-`CGGetEventTapList` сбрасывает min/max latency counters системных taps, поэтому
-inventory нужно делать только в заранее отмеченных точках эксперимента.
-
-## Diagnostics Protocol
-
-Для каждого сценария используется отдельный run. Profile выбирается из списка,
-а UI показывает paired profile и порядок действий. Сценарии, направленные в
-guest, записываются одновременно двумя экземплярами ScrollProbe:
-
-| Действие | Scenario на host | Scenario в guest |
-|---|---|---|
-| Нативное приложение host | `host-native` | - |
-| Horizon напрямую на host | `host-horizon` | - |
-| Нативное приложение guest | `host-to-guest-native` | `guest-native` |
-| Ubuntu Horizon в guest | `host-to-guest-horizon-ubuntu` | `guest-horizon-ubuntu` |
-| Windows Horizon в guest | `host-to-guest-horizon-windows` | `guest-horizon-windows` |
-
-`Physical input` (`Trackpad`/`Mouse`) и UTM pointer (`Mac Trackpad`/`Generic
-Mouse`) выбираются независимо и записываются отдельными metadata fields.
-
-Порядок одного прогона:
-
-1. Для guest-сценария нажать `Start monitor` сначала на host, затем в guest.
-2. Подождать две секунды без input после запуска обоих probes.
-3. Выполнить один короткий контролируемый scroll gesture.
-4. Не касаться устройств до полного завершения momentum.
-5. Подождать две секунды.
-6. Для guest-сценария нажать `Stop` сначала в guest, затем на host.
-7. Сохранить наблюдение о freeze и имя JSONL-файла.
-
-Один gesture означает одно непрерывное вертикальное движение двумя пальцами с
-последующим отпусканием, без повторного касания и смены направления. Для mouse
-control используется один дискретный шаг колеса. Обычное перемещение указателя
-не попадает в эти логи, но случайная или продолжительная прокрутка непригодна
-для численного сравнения сценариев.
-
-Для raw baseline в guest нужно завершить LinearMouse. Его состояние при
-необходимости фиксируется отдельно в наблюдениях эксперимента.
-
-Один и тот же собранный bundle следует использовать на host и guest, чтобы
-сравнивать одинаковый код. До завершения baseline его не следует пересобирать.
-
-## Интерпретация
-
-- `returned` означает решение ingress callback, а не доказанную доставку в
-  Horizon.
-- Небольшое расхождение ingress/downstream внутри одной секундной границы
-  допустимо. Сравнивать нужно также cumulative `totalObserved` после окончания
-  momentum.
-- Совпадение host и guest event count не исключает патологию в phase/delta
-  semantics.
-- Парные runs подтвердили amplification до десятков тысяч zero-delta events.
-  Targeted filter снизил downstream до обычных десятков events/s и устранил
-  freeze в Ubuntu и Windows при обоих UTM pointer devices.
+ScrollProbe is available under the [MIT License](LICENSE).
