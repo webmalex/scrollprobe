@@ -79,7 +79,7 @@ public final class ProbeEngine {
             operatingSystemVersion: ProcessInfo.processInfo.operatingSystemVersionString,
             hostName: Self.localHostName,
             processID: ProcessInfo.processInfo.processIdentifier,
-            bundleIdentifier: Bundle.main.bundleIdentifier ?? "dev.scrollprobe.ScrollProbe",
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? "io.github.webmalex.ScrollProbe",
             applicationVersion: Self.applicationVersion,
             applicationBuild: Self.applicationBuild,
             scenario: scenario.trimmingCharacters(in: .whitespacesAndNewlines),

@@ -37,7 +37,7 @@ public final class EventTapThread {
         let worker = Thread { [weak self] in
             self?.threadMain()
         }
-        worker.name = "dev.scrollprobe.event-tap"
+        worker.name = "io.github.webmalex.scrollprobe.event-tap"
         worker.qualityOfService = .userInteractive
         self.worker = worker
         stateLock.unlock()

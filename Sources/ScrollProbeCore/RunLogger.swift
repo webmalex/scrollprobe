@@ -22,7 +22,7 @@ public final class RunLogger {
 
     public let fileURL: URL
 
-    private let queue = DispatchQueue(label: "dev.scrollprobe.log-writer", qos: .utility)
+    private let queue = DispatchQueue(label: "io.github.webmalex.scrollprobe.log-writer", qos: .utility)
     private let queueKey = DispatchSpecificKey<Void>()
     private let fileHandle: FileHandle
     private let errorHandler: (Error) -> Void

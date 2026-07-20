@@ -93,7 +93,10 @@ private final class ApplicationInstanceLock {
         ).first else {
             return nil
         }
-        let lockDirectory = cachesDirectory.appendingPathComponent("dev.scrollprobe.ScrollProbe", isDirectory: true)
+        let lockDirectory = cachesDirectory.appendingPathComponent(
+            "io.github.webmalex.ScrollProbe",
+            isDirectory: true
+        )
         do {
             try FileManager.default.createDirectory(
                 at: lockDirectory,
