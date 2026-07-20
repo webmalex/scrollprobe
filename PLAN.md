@@ -369,18 +369,19 @@ Horizon. Нельзя называть его доказанным `EventOut`.
 | Drop-all bypass mode | Реализован, не нужен для рабочего workaround |
 | Zero-delta changed filter | Подтверждённый workaround, Ubuntu/Windows без freeze |
 | Menu-bar protection agent | Реализован в v0.3, guest acceptance успешен |
-| Public beta preparation | v0.6 identity/docs/CI/release workflow готовы |
-| Developer ID notarization | Ожидает certificate и Keychain credentials |
+| Public beta preparation | v0.6 identity и GitHub-attested workflow готовы |
+| Developer ID notarization | Недоступна без платного membership; отложена |
 | Throttling filter | Не требуется при текущем targeted workaround |
 | IOHID/DriverKit | Не требуется при работающем CGEventTap workaround |
 
 ## Следующий шаг
 
 Рабочий workaround принят и постоянно используется. Репозиторий опубликован как
-`webmalex/scrollprobe`; следующая блокирующая операция для public beta — получить
-Developer ID Application certificate, сохранить notary credentials в Keychain и
-собрать notarized `0.6.0-beta.1`. Lifecycle tests продолжаются параллельно и не
-блокируют честно обозначенную experimental beta.
+`webmalex/scrollprobe`. Следующий шаг public beta: получить ad-hoc signed ZIP из
+GitHub-hosted CI вместе с SHA-256 и artifact attestation, проверить именно этот
+архив локальной чистой установкой и затем опубликовать его как prerelease.
+Developer ID/notarization отложены и не блокируют честно обозначенную
+experimental beta. Lifecycle tests продолжаются параллельно.
 
 ## Smoke test ScrollProbe 2026-07-17
 
@@ -600,14 +601,15 @@ singleton через `open -n` и совпадение installed executable с p
    повторно выдать Accessibility и зарегистрировать Launch at Login.
 3. Добавлены English public README, MIT license, privacy disclosure, uninstall,
    security reporting, issue template и ARM64 macOS CI.
-4. Подготовлен local release workflow для Developer ID signing, Hardened
-   Runtime, timestamp, `notarytool`, staple, Gatekeeper verification и SHA-256.
-   Credentials остаются только в Keychain.
-5. На host пока нет ни одной valid codesigning identity; `notarytool 1.1.0`
-   установлен. Следующий внешний шаг — Apple Developer enrollment/certificate.
+4. Платный Apple Developer membership истёк; пользователь не будет и физически
+   не может продлить его из-за платёжных ограничений. Developer ID и Apple
+   notarization отложены, а beta явно маркируется как unnotarized.
+5. Основной beta workflow переведён на GitHub-hosted CI: ad-hoc signature,
+   SHA-256, Sigstore-backed GitHub artifact attestation и downloadable artifact.
+   Пользователь разрешает первый запуск штатным `Privacy & Security > Open
+   Anyway`; отключение Gatekeeper и снятие quarantine не предлагаются.
 6. Public identity прошла 6 unit tests, все pre-commit checks, release build,
-   plist/codesign verification и local ad-hoc packaging. Этот ZIP не является
-   public artifact: Developer ID signing изменит binary и итоговый checksum.
+   plist/codesign verification и local ad-hoc packaging.
 7. Первый публичный GitHub Actions run для commit `dc6b93f` успешно прошёл на
    clean `macos-15` ARM64 runner: hooks, tests, package, signature и bundle ID.
 
@@ -646,8 +648,8 @@ resources, закрытие окна не завершает agent, а ошиб�
 
 1. Окончательные product name `ScrollProbe` и bundle ID
    `io.github.webmalex.ScrollProbe` выбраны.
-2. Developer ID/hardened runtime/timestamp/notarization/staple автоматизированы;
-   получить certificate и выполнить первый реальный notarized build.
+2. GitHub-attested ad-hoc beta workflow реализован; Developer ID/notarization
+   отложены до появления законного доступа к Apple Developer Program.
 3. MIT license, privacy statement, uninstall и Accessibility onboarding добавлены.
 4. Protection mode не пишет input data/diagnostic logs и не использует сеть.
    Diagnostics opt-in; до реализации sanitized export публичная документация и
@@ -671,8 +673,9 @@ UTM/Apple Virtualization в явно перечисленной топологи
 requirement `dev.scrollprobe.ScrollProbe`. Для public beta выбран окончательный
 bundle ID `io.github.webmalex.ScrollProbe`; это намеренно требует последней
 одноразовой миграции TCC/login item с build 9. Локальные ad-hoc builds сохраняют
-стабильный identifier-only requirement, а public builds получают обычный
-Developer ID designated requirement.
+стабильный identifier-only requirement. Текущие public beta builds также ad-hoc
+signed; переход на Developer ID изменит designated requirement только если этот
+канал распространения станет доступен.
 
 Отдельный Input Monitoring не нужен: оба taps и metrics работают с выданным
 Accessibility. `CGRequestListenEventAccess()` удален из UI, поскольку на macOS 15

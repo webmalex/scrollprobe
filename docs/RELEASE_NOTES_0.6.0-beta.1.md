@@ -25,11 +25,19 @@ Highlights:
 This is a beta for a specific reproduced virtualization path, not a universal
 Horizon fix. Other macOS, UTM, and Horizon versions need independent testing.
 
+This beta is ad-hoc signed and is not Apple-notarized. macOS requires explicit
+approval through **System Settings > Privacy & Security > Open Anyway** on first
+launch. Do not disable Gatekeeper or remove quarantine attributes.
+
 Installation, Accessibility rationale, privacy behavior, known limitations, and
 source-build instructions are documented in the repository README.
 
-SHA-256 (`ScrollProbe-0.6.0-macos-arm64.zip`):
+Download both the ZIP and its `.sha256` asset, then verify them:
 
-```text
-TO BE FILLED FROM make release-package OUTPUT
+```sh
+shasum -a 256 -c ScrollProbe-0.6.0-macos-arm64.zip.sha256
+gh attestation verify ScrollProbe-0.6.0-macos-arm64.zip \
+  --repo webmalex/scrollprobe \
+  --signer-workflow webmalex/scrollprobe/.github/workflows/ci.yml \
+  --deny-self-hosted-runners
 ```

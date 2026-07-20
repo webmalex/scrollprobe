@@ -23,6 +23,10 @@ Horizon.
 > ScrollProbe is an experimental workaround for a reproduced virtualization
 > bug, not a universal Horizon or scrolling fix. Read the compatibility and
 > privacy sections before enabling it.
+>
+> Public beta archives are ad-hoc signed and are not Apple-notarized. GitHub
+> Actions signs their build provenance instead. macOS therefore requires an
+> explicit **Open Anyway** approval on first launch.
 
 ## What it does
 
@@ -67,15 +71,35 @@ formal control matrix is not complete.
 Public release archives will be attached to the
 [GitHub Releases](https://github.com/webmalex/scrollprobe/releases) page.
 
-1. Download `ScrollProbe-<version>-macos-arm64.zip` and extract it.
-2. Move `ScrollProbe.app` to `/Applications` or `~/Applications`.
-3. Open the app and choose `Enable Protection`.
-4. Grant ScrollProbe access in **System Settings > Privacy & Security >
-   Accessibility**.
-5. Confirm that the menu bar shield reports `Protection: Active`.
-6. Optionally enable `Launch at Login` from the menu.
+1. Download `ScrollProbe-<version>-macos-arm64.zip` and its `.sha256` file.
+2. From the download directory, verify the archive checksum:
 
-The app does not require a separate Input Monitoring permission.
+   ```sh
+   shasum -a 256 -c ScrollProbe-0.6.0-macos-arm64.zip.sha256
+   ```
+
+3. Optionally verify that GitHub Actions built this exact archive:
+
+   ```sh
+   gh attestation verify ScrollProbe-0.6.0-macos-arm64.zip \
+     --repo webmalex/scrollprobe \
+     --signer-workflow webmalex/scrollprobe/.github/workflows/ci.yml \
+     --deny-self-hosted-runners
+   ```
+
+4. Extract the ZIP and move `ScrollProbe.app` to `/Applications` or
+   `~/Applications`.
+5. Try to open the app. After macOS blocks the unnotarized beta, open **System
+   Settings > Privacy & Security**, scroll to **Security**, and click **Open
+   Anyway**. Authenticate, then confirm **Open**.
+6. Choose `Enable Protection` and grant ScrollProbe access in **System Settings
+   > Privacy & Security > Accessibility**.
+7. Confirm that the menu bar shield reports `Protection: Active`.
+8. Optionally enable `Launch at Login` from the menu.
+
+Do not disable Gatekeeper or strip quarantine attributes. The app does not
+require a separate Input Monitoring permission. A managed Mac may prohibit
+unnotarized applications entirely; building from source remains the fallback.
 
 ### Migrating from pre-public builds
 
@@ -137,28 +161,23 @@ The local development build is ad-hoc signed. Output:
 ```text
 dist/ScrollProbe.app
 dist/ScrollProbe-0.6.0-macos-arm64.zip
+dist/ScrollProbe-0.6.0-macos-arm64.zip.sha256
 ```
 
 Install repository hooks with `make hooks` and run all checks with `make lint`.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions.
 
-## Maintainer release build
+## Attested beta builds
 
-A public binary must use a Developer ID Application certificate, Hardened
-Runtime, a secure timestamp, and Apple notarization. Store notarization
-credentials in Keychain, then run:
+Every push to `master` is built on GitHub's hosted macOS runner. The workflow
+creates an ad-hoc signed ZIP and checksum, then issues a Sigstore-backed GitHub
+artifact attestation for the ZIP. Release assets are copied from that completed
+workflow rather than rebuilt locally. See [docs/RELEASING.md](docs/RELEASING.md)
+for the exact maintainer procedure.
 
-```sh
-make test lint
-make release-package \
-  SIGN_IDENTITY="Developer ID Application: Example Name (TEAMID)" \
-  NOTARY_PROFILE="scrollprobe-notary"
-```
-
-The target signs the app, submits a temporary ZIP to the Apple notary service,
-staples and validates the ticket, checks Gatekeeper acceptance, creates the
-final ZIP, and prints its SHA-256 checksum. Credentials and private keys are
-never stored in the repository.
+This provenance proves which repository workflow produced the archive; it is
+not a substitute for Apple notarization. Developer ID distribution can be
+added later if access to the Apple service becomes available.
 
 ## Uninstall
 

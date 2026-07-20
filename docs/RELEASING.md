@@ -1,101 +1,91 @@
 # Maintainer release workflow
 
-Public ScrollProbe binaries are distributed outside the Mac App Store. They
-must be signed with Developer ID, use Hardened Runtime and a secure timestamp,
-and be notarized and stapled before upload.
+Public beta binaries are built on a GitHub-hosted macOS runner, ad-hoc signed,
+checksummed, and covered by a GitHub artifact attestation. They are not signed
+with an Apple Developer ID and are not notarized, so macOS requires the user to
+approve the first launch through **Privacy & Security > Open Anyway**.
 
-## One-time Apple setup
+The release asset must be the exact archive produced and attested by CI. Never
+rebuild it between testing and publication.
 
-1. Join the Apple Developer Program and add the account in Xcode.
-2. In **Xcode > Settings > Accounts**, select the team, choose **Manage
-   Certificates**, press `+`, and create a **Developer ID Application**
-   certificate.
-3. Confirm that the certificate and its private key are available:
-
-   ```sh
-   security find-identity -v -p codesigning
-   ```
-
-4. Generate an app-specific password for the Apple ID used for notarization.
-5. Store it in the login Keychain through an interactive secure prompt. Do not
-   put the password on the command line:
-
-   ```sh
-   xcrun notarytool store-credentials scrollprobe-notary \
-     --apple-id "APPLE_ID_EMAIL" \
-     --team-id "TEAM_ID"
-   ```
-
-6. Verify the stored profile without exposing credentials:
-
-   ```sh
-   xcrun notarytool history --keychain-profile scrollprobe-notary
-   ```
-
-Apple references:
-
-- [Create Developer ID certificates](https://developer.apple.com/developer-id/)
-- [Notarize macOS software](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
-- [Customize the notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
-
-## Build and notarize
+## Build the candidate
 
 1. Start from a clean `master` at the intended release commit.
 2. Confirm that `CFBundleShortVersionString` and `CFBundleVersion` were
-   incremented.
-3. Run:
+   incremented and that the release notes match them.
+3. Run the local checks, commit, and push `master`:
 
    ```sh
-   make test lint
-   make release-package \
-     SIGN_IDENTITY="Developer ID Application: NAME (TEAM_ID)" \
-     NOTARY_PROFILE="scrollprobe-notary"
+   make test lint verify-package
+   git push origin master
    ```
 
-4. Preserve the printed SHA-256 value and run the verification target:
+4. Find the successful CI run for that exact commit:
 
    ```sh
-   make verify-release
+   gh run list --workflow CI --branch master --limit 5
    ```
 
-The final artifact for version `0.6.0` is:
+5. Download its artifact. For version `0.6.0`, the artifact name is
+   `ScrollProbe-0.6.0-macos-arm64`:
 
-```text
-dist/ScrollProbe-0.6.0-macos-arm64.zip
+   ```sh
+   mkdir -p dist/attested
+   gh run download RUN_ID \
+     --name ScrollProbe-0.6.0-macos-arm64 \
+     --dir dist/attested
+   ```
+
+## Verify the candidate
+
+Run both checks from the artifact directory:
+
+```sh
+cd dist/attested
+shasum -a 256 -c ScrollProbe-0.6.0-macos-arm64.zip.sha256
+gh attestation verify ScrollProbe-0.6.0-macos-arm64.zip \
+  --repo webmalex/scrollprobe \
+  --signer-workflow webmalex/scrollprobe/.github/workflows/ci.yml \
+  --deny-self-hosted-runners
 ```
 
-The temporary ZIP submitted to Apple is removed after the ticket has been
-stapled to the app and the final archive has been created.
+The attestation result must identify `webmalex/scrollprobe`, the expected commit
+and `.github/workflows/ci.yml`. The denied-self-hosted option confirms that the
+archive came from GitHub-hosted infrastructure.
 
-## Smoke test the distributed archive
+## Smoke test the exact archive
 
-Test the exact final ZIP rather than the build directory:
+Use the downloaded ZIP, not `dist/ScrollProbe.app`:
 
-1. Copy it to a second macOS installation or the UTM guest.
-2. Extract and move the app to `/Applications`.
-3. Confirm that Gatekeeper presents an identified-developer first-launch prompt,
-   not an unidentified-developer or malware warning.
-4. Grant Accessibility and enable Protection.
-5. Verify scrolling, `Copy Status`, Launch at Login, and one quit/relaunch.
+1. Disable `Launch at Login` and quit any pre-public ScrollProbe build.
+2. Extract the archive and move the app to `/Applications`.
+3. Attempt to open it, then approve it through **System Settings > Privacy &
+   Security > Open Anyway**. Do not remove quarantine attributes.
+4. Grant Accessibility, enable Protection, and confirm version/build and active
+   status in the menu.
+5. Verify scrolling, live counters, `Copy Status`, Launch at Login, and one
+   quit/relaunch. Include reboot and VM pause/resume when the release changes
+   lifecycle code.
 
 ## Publish the GitHub prerelease
 
-Create and push an annotated release tag only after the distributed-archive
-smoke test:
+Create the annotated tag only after the exact archive passes its smoke test:
 
 ```sh
 git tag -a v0.6.0-beta.1 -m "ScrollProbe 0.6.0 beta 1"
 git push origin v0.6.0-beta.1
 gh release create v0.6.0-beta.1 \
-  dist/ScrollProbe-0.6.0-macos-arm64.zip \
+  dist/attested/ScrollProbe-0.6.0-macos-arm64.zip \
+  dist/attested/ScrollProbe-0.6.0-macos-arm64.zip.sha256 \
   --prerelease \
   --title "ScrollProbe 0.6.0 beta 1" \
   --notes-file docs/RELEASE_NOTES_0.6.0-beta.1.md
 ```
 
-Maintainers with an established GPG or SSH signing identity may use a signed tag
-instead. Developer ID signing and notarization authenticate the distributed app
-independently of Git tag signing.
+After publication, verify the release from a signed-out browser. Download the
+assets again and repeat both checksum and attestation verification. Confirm the
+source tag, prerelease badge, archive name, and unnotarized-beta warning.
 
-After publication, verify the release page from a signed-out browser and check
-that the archive name, checksum, source tag, and prerelease badge are correct.
+Apple Developer ID signing and notarization are deliberately deferred. If they
+become available later, add them as a separate reviewed workflow; do not imply
+that GitHub attestation changes Gatekeeper's trust decision.
