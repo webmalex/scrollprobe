@@ -12,6 +12,14 @@
 * Перед коммитом запустить `make lint` и убедиться, что
   `commit-msg` hooks из `.pre-commit-config.yaml` проходят.
 
+## Тулчейн Swift
+
+* Терминал: сборка/тесты — `xcrun swift` (Xcode 26.3, Swift 6.2.4).
+* IDE (Swift for VS Code) ходит через `swiftly`: global default — 6.2.4,
+  паритет с Xcode (выровнено 2026-09-16); пины `swift.path` не ставить.
+  Откат: `swiftly use --global-default 5.6.3`.
+* Новые манифесты: `swift-tools-version` >= 6.0 (текущий пакет — 6.0).
+
 ## Цель
 Решить проблему со скролом в VDI
 
